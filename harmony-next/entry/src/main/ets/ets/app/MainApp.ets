@@ -1,7 +1,13 @@
-﻿@Entry
+import { installSharedCoreBridgeHooks } from '../shared/shared_core_bridge_host'
+
+@Entry
 @Component
 struct MainApp {
   @State page: string = 'Home'
+
+  aboutToAppear() {
+    installSharedCoreBridgeHooks()
+  }
 
   build() {
     Column() {

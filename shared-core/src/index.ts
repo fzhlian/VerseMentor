@@ -1,5 +1,5 @@
-﻿export * from './interfaces'
-export * from './models'
+export * from './interfaces'
+export { ScriptPreference, Poem as ScriptPoem, PoemLineVariant, PoemVariants, TtsVoice } from './models'
 export * from './fsm'
 export * from './poems'
 export * from './variants'

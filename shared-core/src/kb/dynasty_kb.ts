@@ -47,9 +47,14 @@ export interface DynastyResolveResult {
 }
 
 export function normalizeDynasty(raw: string): string {
-  const base = stripPunct(normalizeZh(raw))
-  let out = base
-  out = out.replace(/(王朝|朝|代)$/u, '')
+  return stripPunct(normalizeZh(raw)).trim()
+}
+
+function dynastyCore(raw: string): string {
+  let out = normalizeDynasty(raw)
+  out = out.replace(/^大/u, '')
+  out = out.replace(/(王朝|朝代)$/u, '')
+  out = out.replace(/(朝|代)$/u, '')
   return out.trim()
 }
 
@@ -104,21 +109,32 @@ export function buildOrUpdateDynastyKB(input: {
   existingKB?: DynastyKB
   now: number
 }): DynastyKB {
-  const freq = new Map<string, number>()
+  const aliasFreq = new Map<string, number>()
+  const aliasToCore = new Map<string, string>()
+  const coreFreq = new Map<string, number>()
+
   for (const raw of input.observedDynasties) {
-    const norm = normalizeDynasty(raw)
-    if (!norm) continue
-    freq.set(norm, (freq.get(norm) ?? 0) + 1)
+    const alias = normalizeDynasty(raw)
+    if (!alias) continue
+    const core = dynastyCore(alias) || alias
+    aliasFreq.set(alias, (aliasFreq.get(alias) ?? 0) + 1)
+    aliasToCore.set(alias, core)
+    coreFreq.set(core, (coreFreq.get(core) ?? 0) + 1)
   }
 
-  const unique = Array.from(freq.keys())
-  const clusters = clusterBySimilarity(unique, 0.86)
+  const uniqueCores = Array.from(coreFreq.keys())
+  const clusters = clusterBySimilarity(uniqueCores, 0.86)
 
   const autoCanonicals: DynastyCanonical[] = []
-  const autoAliases: DynastyAlias[] = []
+  const autoAliasByAlias = new Map<string, DynastyAlias>()
+  const coreToCanonicalName = new Map<string, string>()
 
   for (const cluster of clusters) {
-    const canonicalName = chooseCanonical(cluster, freq)
+    const canonicalName = chooseCanonical(cluster, coreFreq)
+    for (const member of cluster) {
+      coreToCanonicalName.set(member, canonicalName)
+    }
+
     const canonicalId = makeDynastyId(canonicalName)
     autoCanonicals.push({
       id: canonicalId,
@@ -126,23 +142,25 @@ export function buildOrUpdateDynastyKB(input: {
       source: 'auto',
       createdAt: input.now,
       updatedAt: input.now,
-      freq: freq.get(canonicalName) ?? 0
+      freq: coreFreq.get(canonicalName) ?? 0
     })
-
-    for (const member of cluster) {
-      if (member === canonicalName) continue
-      const aliasId = `alias_${makeDynastyId(member)}`
-      autoAliases.push({
-        id: aliasId,
-        alias: member,
-        canonicalId,
-        source: 'auto',
-        createdAt: input.now,
-        updatedAt: input.now,
-        freq: freq.get(member) ?? 0
-      })
-    }
   }
+
+  for (const [alias, freq] of aliasFreq) {
+    const core = aliasToCore.get(alias) ?? alias
+    const canonicalName = coreToCanonicalName.get(core) ?? core
+    if (alias === canonicalName) continue
+    autoAliasByAlias.set(alias, {
+      id: `alias_${makeDynastyId(alias)}`,
+      alias,
+      canonicalId: makeDynastyId(canonicalName),
+      source: 'auto',
+      createdAt: input.now,
+      updatedAt: input.now,
+      freq
+    })
+  }
+  const autoAliases = Array.from(autoAliasByAlias.values())
 
   const existing = input.existingKB
   if (!existing) {
@@ -218,8 +236,8 @@ export function upsertDynastyAliasUser(
     : [...kb.canonicals, canonical!]
 
   const existing = kb.aliases.find((a) => a.alias === alias)
-  const nextAliases = existing
-    ? kb.aliases.map((a) =>
+  const nextAliases: DynastyAlias[] = existing
+    ? kb.aliases.map((a): DynastyAlias =>
         a.alias === alias
           ? { ...a, canonicalId: canonical!.id, source: 'user', updatedAt: now }
           : a
@@ -250,13 +268,19 @@ export function upsertDynastyGroupUser(
   if (!name) return kb
 
   const resolvedIds = canonicalIdsOrNames
-    .map((item) => resolveCanonical(kb, item)?.id ?? makeDynastyId(normalizeDynasty(item)))
-    .filter((id) => !!id)
+    .map((item) => {
+      const resolved = resolveCanonical(kb, item)
+      if (resolved) return resolved.id
+      const normalized = dynastyCore(item) || normalizeDynasty(item)
+      if (!normalized) return undefined
+      return makeDynastyId(normalized)
+    })
+    .filter((id): id is string => !!id)
 
   const id = `grp_${makeDynastyId(name)}`
   const existing = kb.groups.find((g) => g.id === id)
-  const nextGroups = existing
-    ? kb.groups.map((g) =>
+  const nextGroups: DynastyGroup[] = existing
+    ? kb.groups.map((g): DynastyGroup =>
         g.id === id
           ? { ...g, name, canonicalIds: resolvedIds, source: 'user', updatedAt: now }
           : g
@@ -302,8 +326,13 @@ export function resolveDynastySpoken(kb: DynastyKB, spokenRaw: string): DynastyR
 
   let best: DynastyCanonical | undefined
   let bestScore = 0
+  const normalizedCore = dynastyCore(normalized) || normalized
   for (const c of kb.canonicals) {
-    const score = sim(normalized, normalizeDynasty(c.name))
+    const canonical = normalizeDynasty(c.name)
+    const canonicalCore = dynastyCore(canonical) || canonical
+    const rawScore = normalized === canonical ? 1 : sim(normalized, canonical)
+    const coreScore = normalizedCore === canonicalCore ? 1 : sim(normalizedCore, canonicalCore)
+    const score = Math.max(rawScore, coreScore)
     if (score > bestScore) {
       bestScore = score
       best = c

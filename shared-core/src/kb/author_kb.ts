@@ -164,7 +164,7 @@ export function upsertAuthorUser(
   const existing = kb.authors.find((a) => a.id === id)
   if (existing) {
     const mergedAliases = mergeAliases(existing.aliases, aliases)
-    const updated = kb.authors.map((a) =>
+    const updated: AuthorEntry[] = kb.authors.map((a): AuthorEntry =>
       a.id === id
         ? {
             ...a,

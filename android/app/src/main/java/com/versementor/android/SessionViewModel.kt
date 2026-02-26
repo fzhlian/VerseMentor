@@ -2,6 +2,9 @@ package com.versementor.android
 
 import android.app.Application
 import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.versementor.android.bridge.LocalKotlinBridge
@@ -43,10 +46,10 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionBridge: SessionBridge =
         if (BuildConfig.USE_SHARED_CORE_REDUCER) SharedCoreBridge() else LocalKotlinBridge()
 
-    var uiState: SessionUiState by androidx.compose.runtime.mutableStateOf(SessionUiState())
+    var uiState: SessionUiState by mutableStateOf(SessionUiState())
         private set
 
-    var settings: SettingsState by androidx.compose.runtime.mutableStateOf(SettingsState())
+    var settings: SettingsState by mutableStateOf(SettingsState())
         private set
 
     private var state: SessionState = buildInitialSession(

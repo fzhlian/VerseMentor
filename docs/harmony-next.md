@@ -8,5 +8,6 @@ Steps:
 3. Run the entry module.
 
 Notes:
-- Speech and storage adapters are stubs in `entry/src/main/ets/shared/` and need platform service wiring.
+- Speech adapter in `entry/src/main/ets/ets/shared/speech_impl.ts` now provides a local mock implementation for development.
+- Replace the mock with HarmonyOS NEXT speech recognizer and TTS services for production.
 - Hook the shared-core FSM by dispatching ASR events and handling actions to TTS and UI.

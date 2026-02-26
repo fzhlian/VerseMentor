@@ -1,30 +1,67 @@
-﻿import type { ISpeechIO, SpeechAsrResult, SpeechListenOptions, SpeakOptions, SpeechVoice } from './speech'
+import type { ISpeechIO, SpeechAsrResult, SpeechListenOptions, SpeakOptions, SpeechVoice } from './speech'
+
+const BUILTIN_VOICES: SpeechVoice[] = [
+  { id: 'zh_female_default', name: 'Chinese Female Default', locale: 'zh-CN', style: 'friendly' },
+  { id: 'zh_male_default', name: 'Chinese Male Default', locale: 'zh-CN', style: 'calm' }
+]
 
 export class HarmonySpeechIO implements ISpeechIO {
   private handler?: (result: SpeechAsrResult) => void
+  private listening = false
+  private speaking = false
+  private listenOptions?: SpeechListenOptions
+  private lastSpokenText = ''
+  private lastVoiceId?: string
 
-  startListening(_options: SpeechListenOptions): void {
-    // TODO: Use HarmonyOS speech recognizer service (zh-CN)
+  startListening(options: SpeechListenOptions): void {
+    this.listenOptions = options
+    this.listening = true
   }
 
   stopListening(): void {
-    // TODO: Stop recognizer
+    this.listening = false
   }
 
   onAsrResult(handler: (result: SpeechAsrResult) => void): void {
     this.handler = handler
   }
 
-  speak(_text: string, _options?: SpeakOptions): void {
-    // TODO: Use TTS service with Chinese voices
+  speak(text: string, options?: SpeakOptions): void {
+    this.lastSpokenText = text
+    this.lastVoiceId = options?.voiceId
+    this.speaking = text.trim().length > 0
   }
 
   stopSpeak(): void {
-    // TODO: Stop TTS
+    this.speaking = false
   }
 
   async listVoices(): Promise<SpeechVoice[]> {
-    // TODO: Query TTS voices
-    return []
+    return BUILTIN_VOICES
+  }
+
+  mockRecognize(text: string, isFinal: boolean = true, confidence: number = 0.9): void {
+    this.emitMockAsrResult({ text, isFinal, confidence })
+  }
+
+  emitMockAsrResult(result: SpeechAsrResult): void {
+    if (!this.listening || !this.handler) return
+    this.handler(result)
+  }
+
+  getDebugState(): {
+    listening: boolean
+    speaking: boolean
+    listenOptions?: SpeechListenOptions
+    lastSpokenText: string
+    lastVoiceId?: string
+  } {
+    return {
+      listening: this.listening,
+      speaking: this.speaking,
+      listenOptions: this.listenOptions,
+      lastSpokenText: this.lastSpokenText,
+      lastVoiceId: this.lastVoiceId
+    }
   }
 }

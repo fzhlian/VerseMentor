@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-bridge",
+    "declaration": false
+  },
+  "include": ["src/bridge/**/*.ts"],
+  "exclude": ["dist", "dist-bridge", "node_modules", "test"]
+}

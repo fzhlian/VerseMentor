@@ -7,6 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:bridge": "tsc -p tsconfig.bridge.json",
     "test": "vitest run"
   },
   "devDependencies": {

@@ -1,6 +1,8 @@
 export * from './interfaces'
 export { ScriptPreference, Poem as ScriptPoem, PoemLineVariant, PoemVariants, TtsVoice } from './models'
 export * from './fsm'
+export * from './bridge/session_driver'
+export * from './bridge/session_contract'
 export * from './poems'
 export * from './variants'
 export * from './utils/zh_normalize'

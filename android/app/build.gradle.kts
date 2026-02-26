@@ -1,6 +1,17 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+val variantApiEndpoint: String = (project.findProperty("variantApiEndpoint") as String?)?.trim().orEmpty()
+val useSharedCoreReducer: Boolean = (project.findProperty("useSharedCoreReducer") as String?)
+    ?.trim()
+    ?.lowercase()
+    ?.let { it == "true" || it == "1" || it == "yes" || it == "on" }
+    ?: false
+
+fun quoteForBuildConfig(value: String): String {
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 }
 
 android {
@@ -13,10 +24,13 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
+        buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

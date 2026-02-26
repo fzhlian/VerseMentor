@@ -1,5 +1,6 @@
 ﻿package com.versementor.android.session
 
+import com.versementor.android.storage.PoemVariantsCacheEntry
 import kotlin.math.max
 
 enum class SessionStateType {
@@ -21,6 +22,7 @@ data class SessionContext(
     val poemIndex: PoemIndex,
     val poems: List<Poem>,
     var selectedPoem: Poem? = null,
+    var variantsCacheEntry: PoemVariantsCacheEntry? = null,
     var currentLineIdx: Int = 0,
     var lastUserActiveAt: Long? = null,
     var noPoemIntentSince: Long? = null
@@ -33,7 +35,7 @@ sealed class SessionEvent {
     data class Tick(val now: Long) : SessionEvent()
     data object UserUiStart : SessionEvent()
     data object UserUiStop : SessionEvent()
-    data class VariantsFetched(val entry: Any?) : SessionEvent()
+    data class VariantsFetched(val entry: PoemVariantsCacheEntry?) : SessionEvent()
 }
 
 sealed class SessionAction {
@@ -85,6 +87,7 @@ class SessionReducer {
                         }
                         val top = candidates.first()
                         ctx.selectedPoem = top.poem
+                        ctx.variantsCacheEntry = null
                         if (top.score >= 0.9) {
                             actions += SessionAction.Speak("已选择《${top.poem.title}》。请说出朝代和作者。")
                             actions += SessionAction.FetchVariants(top.poem)
@@ -102,6 +105,8 @@ class SessionReducer {
             SessionStateType.CONFIRM_POEM_CANDIDATE -> {
                 if (event is SessionEvent.UserAsr && event.isFinal) {
                     if (event.text.contains("不是") || event.text.contains("不对")) {
+                        ctx.selectedPoem = null
+                        ctx.variantsCacheEntry = null
                         actions += SessionAction.Speak("好的，请再说一次题目。")
                         actions += SessionAction.StartListening
                         return next(SessionStateType.WAIT_POEM_NAME)
@@ -119,6 +124,10 @@ class SessionReducer {
             }
 
             SessionStateType.WAIT_DYNASTY_AUTHOR -> {
+                if (event is SessionEvent.VariantsFetched) {
+                    ctx.variantsCacheEntry = event.entry
+                    return next(SessionStateType.WAIT_DYNASTY_AUTHOR)
+                }
                 if (event is SessionEvent.UserAsr && event.isFinal) {
                     actions += SessionAction.Speak("好的，开始背诵。")
                     actions += SessionAction.StartListening
@@ -144,7 +153,13 @@ class SessionReducer {
                         ctx.lastUserActiveAt = System.currentTimeMillis()
                         val poem = ctx.selectedPoem ?: return next(SessionStateType.EXIT)
                         val line = poem.lines.getOrNull(ctx.currentLineIdx)?.text ?: ""
-                        val score = scoreLine(event.text, line)
+                        val onlineVariants = ctx.variantsCacheEntry
+                            ?.variants
+                            ?.lines
+                            ?.firstOrNull { it.lineIndex == ctx.currentLineIdx }
+                            ?.variants
+                            .orEmpty()
+                        val score = scoreLineWithVariants(event.text, line, onlineVariants)
                         if (score >= ctx.config.recite.passScore) {
                             val nextIdx = ctx.currentLineIdx + 1
                             if (nextIdx >= poem.lines.size) {
@@ -196,6 +211,7 @@ class SessionReducer {
                         actions += SessionAction.Speak("好的，请说出下一首诗的题目。")
                         actions += SessionAction.StartListening
                         ctx.selectedPoem = null
+                        ctx.variantsCacheEntry = null
                         ctx.currentLineIdx = 0
                         ctx.noPoemIntentSince = System.currentTimeMillis()
                         return next(SessionStateType.WAIT_POEM_NAME)
@@ -209,6 +225,14 @@ class SessionReducer {
             SessionStateType.EXIT -> return next(SessionStateType.EXIT)
             else -> return next(SessionStateType.IDLE)
         }
+    }
+
+    private fun scoreLineWithVariants(userText: String, target: String, variants: List<String>): Double {
+        var best = scoreLine(userText, target)
+        for (variant in variants) {
+            best = max(best, scoreLine(userText, variant))
+        }
+        return best
     }
 
     private fun scoreLine(userText: String, target: String): Double {

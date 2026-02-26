@@ -1,18 +1,28 @@
-﻿package com.versementor.android
+package com.versementor.android
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.versementor.android.bridge.LocalKotlinBridge
+import com.versementor.android.bridge.SessionBridge
+import com.versementor.android.bridge.SharedCoreBridge
+import com.versementor.android.net.HttpClient
+import com.versementor.android.net.OkHttpClientImpl
+import com.versementor.android.session.Poem
+import com.versementor.android.session.SamplePoems
 import com.versementor.android.session.SessionAction
 import com.versementor.android.session.SessionEvent
 import com.versementor.android.session.SessionState
-import com.versementor.android.session.SessionReducer
 import com.versementor.android.session.SessionUiState
-import com.versementor.android.session.SamplePoems
 import com.versementor.android.session.buildDefaultConfig
 import com.versementor.android.session.buildInitialSession
 import com.versementor.android.speech.SpeechIO
+import com.versementor.android.storage.PoemLineVariant
+import com.versementor.android.storage.PoemVariants
+import com.versementor.android.storage.PoemVariantsCacheEntry
 import com.versementor.android.storage.PreferenceStore
+import com.versementor.android.storage.SharedPrefsVariantCacheStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -22,11 +32,16 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         const val MIN_VARIANT_TTL_DAYS = 1
         const val MAX_VARIANT_TTL_DAYS = 365
+        private const val MAX_VARIANTS_PER_LINE = 4
     }
 
     private val prefs = PreferenceStore(app)
+    private val variantCacheStore = SharedPrefsVariantCacheStore(prefs)
+    private val httpClient: HttpClient = OkHttpClientImpl()
     private val speech = SpeechIO(app)
-    private val reducer = SessionReducer()
+    private val variantApiEndpoint: String = BuildConfig.VARIANT_API_ENDPOINT.trim().trimEnd('/')
+    private val sessionBridge: SessionBridge =
+        if (BuildConfig.USE_SHARED_CORE_REDUCER) SharedCoreBridge() else LocalKotlinBridge()
 
     var uiState: SessionUiState by androidx.compose.runtime.mutableStateOf(SessionUiState())
         private set
@@ -68,10 +83,13 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun dispatch(event: SessionEvent) {
-        val output = reducer.reduce(state, event)
+        val output = sessionBridge.reduce(state, event)
         state = output.state
         handleActions(output.actions)
-        uiState = uiState.copy(statusText = state.type.name, lastHeard = if (event is SessionEvent.UserAsr) "ASR: ${event.text}" else uiState.lastHeard)
+        uiState = uiState.copy(
+            statusText = state.type.name,
+            lastHeard = if (event is SessionEvent.UserAsr) "ASR: ${event.text}" else uiState.lastHeard
+        )
     }
 
     private fun handleActions(actions: List<SessionAction>) {
@@ -82,20 +100,139 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     speech.stopListening()
                     speech.speak(action.text, settings.ttsVoiceId)
                 }
+
                 SessionAction.StartListening -> {
                     speech.startListening()
                 }
+
                 SessionAction.StopListening -> {
                     speech.stopListening()
                 }
+
                 is SessionAction.UpdateScreenHint -> {
                     uiState = uiState.copy(logs = uiState.logs + "Hint: ${action.key}")
                 }
+
                 is SessionAction.FetchVariants -> {
-                    uiState = uiState.copy(logs = uiState.logs + "Fetch variants for ${action.poem.title}")
+                    fetchVariants(action.poem)
                 }
             }
         }
+    }
+
+    private fun fetchVariants(poem: Poem) {
+        if (!state.ctx.config.variants.enableOnline) {
+            viewModelScope.launch(Dispatchers.Main) {
+                uiState = uiState.copy(logs = uiState.logs + "Variants disabled, skip ${poem.title}")
+                dispatch(SessionEvent.VariantsFetched(null))
+            }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val cacheKey = poem.id
+
+            val resolved = runCatching {
+                val cached = variantCacheStore.get(cacheKey)
+                if (cached != null && cached.expiresAt > now) {
+                    cached to "cache"
+                } else {
+                    val onlineEntry = fetchOnlineVariantEntry(poem, now)
+                    val nextEntry = onlineEntry ?: buildLocalVariantEntry(poem, now)
+                    val source = if (onlineEntry == null) "local-default" else "online"
+                    variantCacheStore.set(cacheKey, nextEntry)
+                    nextEntry to source
+                }
+            }.getOrNull()
+
+            withContext(Dispatchers.Main.immediate) {
+                if (resolved == null) {
+                    uiState = uiState.copy(logs = uiState.logs + "Variants fetch failed for ${poem.title}")
+                    dispatch(SessionEvent.VariantsFetched(null))
+                } else {
+                    val (resolvedEntry, source) = resolved
+                    uiState = uiState.copy(logs = uiState.logs + "Variants ready (${source}) for ${poem.title}")
+                    dispatch(SessionEvent.VariantsFetched(resolvedEntry))
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchOnlineVariantEntry(poem: Poem, now: Long): PoemVariantsCacheEntry? {
+        if (variantApiEndpoint.isBlank()) return null
+
+        val url = buildVariantApiUrl(poem)
+        val response = runCatching {
+            httpClient.getJson(url, VariantProviderResponse::class.java)
+        }.getOrNull() ?: return null
+
+        val lines = response.lines
+            .orEmpty()
+            .mapNotNull { line ->
+                val idx = line.lineIndex ?: return@mapNotNull null
+                val texts = line.variants
+                    .orEmpty()
+                    .mapNotNull { candidate ->
+                        candidate.text
+                            ?.trim()
+                            ?.takeIf(String::isNotEmpty)
+                            ?.let { text -> text to (candidate.confidence ?: 0.6) }
+                    }
+                    .sortedWith(compareByDescending<Pair<String, Double>> { it.second }.thenBy { it.first })
+                    .map { it.first }
+                    .distinct()
+                    .take(MAX_VARIANTS_PER_LINE)
+                if (texts.isEmpty()) null else PoemLineVariant(lineIndex = idx, variants = texts)
+            }
+            .sortedBy { it.lineIndex }
+
+        val sourceTag = response.provider?.trim()?.takeIf(String::isNotEmpty) ?: "http"
+
+        return PoemVariantsCacheEntry(
+            poemId = poem.id,
+            variants = PoemVariants(
+                poemId = poem.id,
+                lines = lines,
+                sourceTags = listOf(sourceTag)
+            ),
+            cachedAt = now,
+            expiresAt = now + computeVariantTtlMs()
+        )
+    }
+
+    private fun buildVariantApiUrl(poem: Poem): String {
+        val query = listOf(
+            "title" to poem.title,
+            "author" to poem.author,
+            "dynasty" to poem.dynasty
+        ).joinToString("&") { (k, v) ->
+            "${Uri.encode(k)}=${Uri.encode(v)}"
+        }
+        return "${variantApiEndpoint}?${query}"
+    }
+
+    private fun computeVariantTtlMs(): Long {
+        return state.ctx.config.variants.ttlDays
+            .coerceIn(MIN_VARIANT_TTL_DAYS, MAX_VARIANT_TTL_DAYS)
+            .toLong() * 24L * 60L * 60L * 1000L
+    }
+
+    private fun buildLocalVariantEntry(poem: Poem, now: Long): PoemVariantsCacheEntry {
+        val variants = PoemVariants(
+            poemId = poem.id,
+            lines = poem.lines.mapIndexed { idx, line ->
+                PoemLineVariant(lineIndex = idx, variants = listOf(line.text))
+            },
+            sourceTags = listOf("local-default")
+        )
+
+        return PoemVariantsCacheEntry(
+            poemId = poem.id,
+            variants = variants,
+            cachedAt = now,
+            expiresAt = now + computeVariantTtlMs()
+        )
     }
 
     private fun loadSettings() {
@@ -116,7 +253,11 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         settings = settings.copy(followSystem = follow)
         prefs.saveSettings(settings)
         syncStateConfig()
-        val locales = if (follow) androidx.core.os.LocaleListCompat.getEmptyLocaleList() else androidx.core.os.LocaleListCompat.forLanguageTags("zh")
+        val locales = if (follow) {
+            androidx.core.os.LocaleListCompat.getEmptyLocaleList()
+        } else {
+            androidx.core.os.LocaleListCompat.forLanguageTags("zh")
+        }
         androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(locales)
     }
 
@@ -126,7 +267,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         syncStateConfig()
     }
 
-    fun setAccentTolerance(anAng: Boolean? = null, enEng: Boolean? = null, inIng: Boolean? = null, ianIang: Boolean? = null) {
+    fun setAccentTolerance(
+        anAng: Boolean? = null,
+        enEng: Boolean? = null,
+        inIng: Boolean? = null,
+        ianIang: Boolean? = null
+    ) {
         val current = settings.accentTolerance
         settings = settings.copy(
             accentTolerance = current.copy(
@@ -207,5 +353,19 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         speech.release()
         super.onCleared()
     }
-}
 
+    private data class VariantProviderResponse(
+        val provider: String? = null,
+        val lines: List<VariantProviderLine>? = null
+    )
+
+    private data class VariantProviderLine(
+        val lineIndex: Int? = null,
+        val variants: List<VariantCandidatePayload>? = null
+    )
+
+    private data class VariantCandidatePayload(
+        val text: String? = null,
+        val confidence: Double? = null
+    )
+}

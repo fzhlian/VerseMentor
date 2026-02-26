@@ -1,0 +1,9 @@
+/node_modules
+/dist
+/build
+/.gradle
+/android/.gradle
+/android/.gradle-wrapper
+/.idea
+*.iml
+.DS_Store

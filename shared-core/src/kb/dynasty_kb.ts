@@ -349,11 +349,70 @@ export function serializeDynastyKB(kb: DynastyKB): string {
   return JSON.stringify(kb)
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isSourceTag(value: unknown): value is SourceTag {
+  return value === 'auto' || value === 'user' || value === 'import'
+}
+
+function sanitizeCanonicals(value: unknown): DynastyCanonical[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => isObjectRecord(item))
+    .filter(
+      (item): item is DynastyCanonical =>
+        typeof item.id === 'string' &&
+        typeof item.name === 'string' &&
+        isSourceTag(item.source) &&
+        typeof item.createdAt === 'number' &&
+        typeof item.updatedAt === 'number' &&
+        typeof item.freq === 'number'
+    )
+}
+
+function sanitizeAliases(value: unknown): DynastyAlias[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => isObjectRecord(item))
+    .filter(
+      (item): item is DynastyAlias =>
+        typeof item.id === 'string' &&
+        typeof item.alias === 'string' &&
+        typeof item.canonicalId === 'string' &&
+        isSourceTag(item.source) &&
+        typeof item.createdAt === 'number' &&
+        typeof item.updatedAt === 'number' &&
+        typeof item.freq === 'number'
+    )
+}
+
+function sanitizeGroups(value: unknown): DynastyGroup[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => isObjectRecord(item))
+    .filter(
+      (item): item is DynastyGroup =>
+        typeof item.id === 'string' &&
+        typeof item.name === 'string' &&
+        Array.isArray(item.canonicalIds) &&
+        item.canonicalIds.every((id) => typeof id === 'string') &&
+        isSourceTag(item.source) &&
+        typeof item.createdAt === 'number' &&
+        typeof item.updatedAt === 'number' &&
+        typeof item.freq === 'number'
+    )
+}
+
 export function deserializeDynastyKB(raw: string): DynastyKB {
-  const parsed = JSON.parse(raw) as DynastyKB
+  const parsed = JSON.parse(raw) as unknown
+  if (!isObjectRecord(parsed)) {
+    return { canonicals: [], aliases: [], groups: [] }
+  }
   return {
-    canonicals: parsed.canonicals ?? [],
-    aliases: parsed.aliases ?? [],
-    groups: parsed.groups ?? []
+    canonicals: sanitizeCanonicals(parsed.canonicals),
+    aliases: sanitizeAliases(parsed.aliases),
+    groups: sanitizeGroups(parsed.groups)
   }
 }

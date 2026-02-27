@@ -1,7 +1,9 @@
 ﻿import { describe, expect, test } from 'vitest'
 import {
   buildOrUpdateDynastyKB,
+  deserializeDynastyKB,
   resolveDynastySpoken,
+  serializeDynastyKB,
   upsertDynastyAliasUser
 } from '../src/kb/dynasty_kb'
 
@@ -42,5 +44,30 @@ describe('dynasty_kb', () => {
     const result = resolveDynastySpoken(kb, '大唐')
     expect(result.matchedBy).toBe('fuzzy')
     expect(result.canonical?.name).toBe('唐')
+  })
+
+  test('serialize/deserialize roundtrip keeps kb', () => {
+    const kb = buildOrUpdateDynastyKB({
+      observedDynasties: ['唐', '宋'],
+      now
+    })
+
+    const raw = serializeDynastyKB(kb)
+    const decoded = deserializeDynastyKB(raw)
+    expect(decoded).toEqual(kb)
+  })
+
+  test('deserialize filters invalid records', () => {
+    const raw = JSON.stringify({
+      canonicals: [{ id: 'dyn_tang', name: '唐', source: 'auto', createdAt: now, updatedAt: now, freq: 1 }, { id: 1 }],
+      aliases: [{ id: 'alias_tang', alias: '唐朝', canonicalId: 'dyn_tang', source: 'auto', createdAt: now, updatedAt: now, freq: 1 }, {}],
+      groups: [{ id: 'grp_cn', name: '中古', canonicalIds: ['dyn_tang'], source: 'user', createdAt: now, updatedAt: now, freq: 0 }, { id: 'bad', canonicalIds: 'dyn_tang' }]
+    })
+
+    const decoded = deserializeDynastyKB(raw)
+    expect(decoded.canonicals).toHaveLength(1)
+    expect(decoded.aliases).toHaveLength(1)
+    expect(decoded.groups).toHaveLength(1)
+    expect(decoded.canonicals[0].name).toBe('唐')
   })
 })

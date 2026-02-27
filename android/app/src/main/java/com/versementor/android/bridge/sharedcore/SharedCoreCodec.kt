@@ -24,17 +24,79 @@ class SharedCoreCodec(
         return gson.toJson(eventToEnvelope(event))
     }
 
+    fun decodeState(raw: String): SessionState? {
+        val envelope = try {
+            gson.fromJson(raw, SharedCoreStateEnvelope::class.java)
+        } catch (_: JsonSyntaxException) {
+            null
+        } ?: return null
+        return try {
+            stateFromEnvelope(envelope)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    fun decodeEvent(raw: String): SessionEvent? {
+        val envelope = try {
+            gson.fromJson(raw, SharedCoreEventEnvelope::class.java)
+        } catch (_: JsonSyntaxException) {
+            null
+        } ?: return null
+        return try {
+            eventFromEnvelope(envelope)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    fun encodeOutput(output: SessionOutput): String {
+        val envelope = SharedCoreReducerResponseEnvelope(
+            state = stateToEnvelope(output.state),
+            actions = output.actions.map { actionToEnvelope(it) }
+        )
+        return gson.toJson(envelope)
+    }
+
     fun decodeOutput(raw: String): SessionOutput? {
+        return decodeOutputWithReason(raw).output
+    }
+
+    fun decodeOutputWithReason(raw: String): SharedCoreDecodeOutputResult {
         val envelope = try {
             gson.fromJson(raw, SharedCoreReducerResponseEnvelope::class.java)
         } catch (_: JsonSyntaxException) {
             null
-        } ?: return null
+        } ?: return SharedCoreDecodeOutputResult(output = null, reason = "invalid-json")
 
-        val state = stateFromEnvelope(envelope.state) ?: return null
-        val actions = envelope.actions.mapNotNull { actionFromEnvelope(it) }
-        if (actions.size != envelope.actions.size) return null
-        return SessionOutput(state, actions)
+        val state = try {
+            stateFromEnvelope(envelope.state)
+        } catch (_: Throwable) {
+            null
+        }
+            ?: return SharedCoreDecodeOutputResult(output = null, reason = "state-invalid")
+        val rawActions = try {
+            envelope.actions
+        } catch (_: Throwable) {
+            null
+        } ?: return SharedCoreDecodeOutputResult(output = null, reason = "actions-invalid")
+
+        val actionResults = try {
+            rawActions.map {
+                try {
+                    actionFromEnvelope(it)
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        } catch (_: Throwable) {
+            return SharedCoreDecodeOutputResult(output = null, reason = "actions-invalid")
+        }
+        if (actionResults.any { it == null }) {
+            return SharedCoreDecodeOutputResult(output = null, reason = "actions-invalid")
+        }
+        val actions = actionResults.filterNotNull()
+        return SharedCoreDecodeOutputResult(output = SessionOutput(state, actions), reason = null)
     }
 
     private fun stateToEnvelope(state: SessionState): SharedCoreStateEnvelope {
@@ -48,7 +110,8 @@ class SharedCoreCodec(
                 variantsCacheEntry = ctx.variantsCacheEntry,
                 currentLineIdx = ctx.currentLineIdx,
                 lastUserActiveAt = ctx.lastUserActiveAt,
-                noPoemIntentSince = ctx.noPoemIntentSince
+                noPoemIntentSince = ctx.noPoemIntentSince,
+                hintOfferSince = ctx.hintOfferSince
             )
         )
     }
@@ -68,7 +131,8 @@ class SharedCoreCodec(
             variantsCacheEntry = envelope.ctx.variantsCacheEntry,
             currentLineIdx = envelope.ctx.currentLineIdx,
             lastUserActiveAt = envelope.ctx.lastUserActiveAt,
-            noPoemIntentSince = envelope.ctx.noPoemIntentSince
+            noPoemIntentSince = envelope.ctx.noPoemIntentSince,
+            hintOfferSince = envelope.ctx.hintOfferSince
         )
         return SessionState(type, ctx)
     }
@@ -79,7 +143,8 @@ class SharedCoreCodec(
                 type = "USER_ASR",
                 text = event.text,
                 isFinal = event.isFinal,
-                confidence = event.confidence
+                confidence = event.confidence,
+                now = event.now
             )
             is SessionEvent.UserAsrError -> SharedCoreEventEnvelope(
                 type = "USER_ASR_ERROR",
@@ -87,12 +152,50 @@ class SharedCoreCodec(
                 message = event.message
             )
             is SessionEvent.Tick -> SharedCoreEventEnvelope(type = "TICK", now = event.now)
-            SessionEvent.UserUiStart -> SharedCoreEventEnvelope(type = "USER_UI_START")
+            is SessionEvent.UserUiStart -> SharedCoreEventEnvelope(type = "USER_UI_START", now = event.now)
             SessionEvent.UserUiStop -> SharedCoreEventEnvelope(type = "USER_UI_STOP")
             is SessionEvent.VariantsFetched -> SharedCoreEventEnvelope(
                 type = "EV_VARIANTS_FETCH_DONE",
                 entry = event.entry
             )
+        }
+    }
+
+    private fun eventFromEnvelope(envelope: SharedCoreEventEnvelope): SessionEvent? {
+        return when (envelope.type) {
+            "USER_ASR" -> {
+                val text = envelope.text ?: return null
+                val isFinal = envelope.isFinal ?: return null
+                SessionEvent.UserAsr(
+                    text = text,
+                    isFinal = isFinal,
+                    confidence = envelope.confidence,
+                    now = envelope.now
+                )
+            }
+            "USER_ASR_ERROR" -> {
+                val code = envelope.code ?: return null
+                val message = envelope.message ?: return null
+                SessionEvent.UserAsrError(code = code, message = message)
+            }
+            "TICK" -> {
+                val now = envelope.now ?: return null
+                SessionEvent.Tick(now = now)
+            }
+            "USER_UI_START" -> SessionEvent.UserUiStart(now = envelope.now)
+            "USER_UI_STOP" -> SessionEvent.UserUiStop
+            "EV_VARIANTS_FETCH_DONE" -> SessionEvent.VariantsFetched(entry = envelope.entry)
+            else -> null
+        }
+    }
+
+    private fun actionToEnvelope(action: SessionAction): SharedCoreActionEnvelope {
+        return when (action) {
+            is SessionAction.Speak -> SharedCoreActionEnvelope(type = "SPEAK", text = action.text)
+            SessionAction.StartListening -> SharedCoreActionEnvelope(type = "START_LISTENING")
+            SessionAction.StopListening -> SharedCoreActionEnvelope(type = "STOP_LISTENING")
+            is SessionAction.UpdateScreenHint -> SharedCoreActionEnvelope(type = "UPDATE_SCREEN_HINT", key = action.key)
+            is SessionAction.FetchVariants -> SharedCoreActionEnvelope(type = "FETCH_VARIANTS", poem = action.poem)
         }
     }
 
@@ -120,7 +223,8 @@ data class SharedCoreContextEnvelope(
     val variantsCacheEntry: PoemVariantsCacheEntry? = null,
     val currentLineIdx: Int = 0,
     val lastUserActiveAt: Long? = null,
-    val noPoemIntentSince: Long? = null
+    val noPoemIntentSince: Long? = null,
+    val hintOfferSince: Long? = null
 )
 
 data class SharedCoreEventEnvelope(
@@ -144,4 +248,9 @@ data class SharedCoreActionEnvelope(
 data class SharedCoreReducerResponseEnvelope(
     val state: SharedCoreStateEnvelope,
     val actions: List<SharedCoreActionEnvelope> = emptyList()
+)
+
+data class SharedCoreDecodeOutputResult(
+    val output: SessionOutput?,
+    val reason: String?
 )

@@ -22,8 +22,8 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.4.6"
+        versionCode = 11
+        versionName = "0.4.7"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
     }
@@ -61,5 +61,6 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
+    testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

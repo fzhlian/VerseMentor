@@ -70,7 +70,8 @@ struct SessionPage {
         type: 'USER_ASR',
         text: result.text,
         isFinal: result.isFinal === true,
-        confidence: result.confidence
+        confidence: result.confidence,
+        now: Date.now()
       })
     })
     this.speech.onAsrError((error) => {
@@ -186,7 +187,7 @@ struct SessionPage {
   }
 
   private startSession() {
-    this.dispatchEvent({ type: 'USER_UI_START' })
+    this.dispatchEvent({ type: 'USER_UI_START', now: Date.now() })
   }
 
   private stopSession() {

@@ -41,9 +41,10 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 onAsrError?.invoke(error, mapAsrError(error))
             }
             override fun onResults(results: Bundle?) {
-                val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val bundle = results ?: return
+                val list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = list?.firstOrNull() ?: return
-                val confidence = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)?.firstOrNull()
+                val confidence = bundle.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)?.firstOrNull()
                 onAsrResult?.invoke(text, true, confidence)
             }
             override fun onPartialResults(partialResults: Bundle?) {
@@ -64,7 +65,12 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                     override fun onDone(utteranceId: String?) {
                         onSpeaking?.invoke(false)
                     }
+                    @Deprecated("Use onError(utteranceId: String?, errorCode: Int) on newer APIs.")
                     override fun onError(utteranceId: String?) {
+                        onSpeaking?.invoke(false)
+                    }
+
+                    override fun onError(utteranceId: String?, errorCode: Int) {
                         onSpeaking?.invoke(false)
                     }
                 })

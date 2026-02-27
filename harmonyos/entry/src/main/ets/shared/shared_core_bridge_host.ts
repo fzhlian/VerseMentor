@@ -3,11 +3,11 @@ interface BridgeHost {
 }
 
 type DriverEvent =
-  | { type: 'USER_ASR'; text?: string; isFinal?: boolean }
+  | { type: 'USER_ASR'; text?: string; isFinal?: boolean; confidence?: number; now?: number }
   | { type: 'USER_ASR_ERROR'; code?: number; message?: string }
   | { type: 'TICK'; now?: number }
   | { type: 'EV_VARIANTS_FETCH_DONE'; entry?: unknown | null }
-  | { type: 'USER_UI_START' }
+  | { type: 'USER_UI_START'; now?: number }
   | { type: 'USER_UI_STOP' }
 
 type DriverAction =
@@ -51,6 +51,8 @@ const DRIVER_LINES: string[] = [
 let installed = false
 type HookMode = 'mock' | 'delegate'
 let hookMode: HookMode = 'mock'
+let nextDelegateToken = 1
+let currentDelegateToken: number | null = null
 
 const CREATE_HOOK_NAME = '__vmCreateSessionDriverStateJson'
 const REDUCE_HOOK_NAME = '__vmReduceSessionDriverJson'
@@ -128,7 +130,9 @@ function parseEventJson(raw: string): DriverEvent {
         return {
           type: 'USER_ASR',
           text: typeof event['text'] === 'string' ? event['text'] : '',
-          isFinal: event['isFinal'] === true
+          isFinal: event['isFinal'] === true,
+          confidence: typeof event['confidence'] === 'number' ? event['confidence'] : undefined,
+          now: typeof event['now'] === 'number' ? event['now'] : undefined
         }
       }
       if (type === 'USER_ASR_ERROR') {
@@ -144,7 +148,12 @@ function parseEventJson(raw: string): DriverEvent {
       if (type === 'EV_VARIANTS_FETCH_DONE') {
         return { type: 'EV_VARIANTS_FETCH_DONE', entry: event['entry'] ?? null }
       }
-      if (type === 'USER_UI_START') return { type: 'USER_UI_START' }
+      if (type === 'USER_UI_START') {
+        return {
+          type: 'USER_UI_START',
+          now: typeof event['now'] === 'number' ? event['now'] : undefined
+        }
+      }
       if (type === 'USER_UI_STOP') return { type: 'USER_UI_STOP' }
     }
   } catch (_err) {
@@ -351,19 +360,27 @@ export function installSharedCoreBridgeHooks(): void {
   installed = true
 }
 
-export function registerSharedCoreDelegateHooks(hooks: SharedCoreDelegateHooks): void {
+export function registerSharedCoreDelegateHooks(hooks: SharedCoreDelegateHooks): number {
   const host = getHost()
+  const token = nextDelegateToken++
   host[DELEGATE_CREATE_HOOK_NAME] = hooks.createSessionDriverStateJson
   host[DELEGATE_REDUCE_HOOK_NAME] = hooks.reduceSessionDriverJson
+  currentDelegateToken = token
   hookMode = 'delegate'
+  return token
 }
 
-export function clearSharedCoreDelegateHooks(): void {
+export function clearSharedCoreDelegateHooks(token?: number): boolean {
+  if (token !== undefined && currentDelegateToken !== token) {
+    return false
+  }
   const host = getHost()
   const mutable = host as Record<string, unknown>
   delete mutable[DELEGATE_CREATE_HOOK_NAME]
   delete mutable[DELEGATE_REDUCE_HOOK_NAME]
+  currentDelegateToken = null
   hookMode = 'mock'
+  return true
 }
 
 export function getSharedCoreHookMode(): HookMode {

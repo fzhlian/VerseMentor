@@ -1,4 +1,4 @@
-﻿package com.versementor.android
+package com.versementor.android
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,7 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -195,7 +195,7 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         Text(text = ui.lastSpoken)
         Text(text = ui.lastHeard)
         Button(onClick = onBack) { Text(text = "Back") }
-        Divider()
+        HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(ui.logs) { line ->
                 Text(text = line)
@@ -340,8 +340,24 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
             }
         }
 
-        Divider()
+        HorizontalDivider()
         Text(text = "Debug")
+        Text(text = "All Bridge Checks: ${viewModel.allBridgeCheckResult}")
+        Button(onClick = { viewModel.runAllBridgeChecks() }) {
+            Text(text = "Check All Bridge")
+        }
+        Text(text = "Bridge Event Check: ${viewModel.eventCheckResult}")
+        Button(onClick = { viewModel.runBridgeEventRoundTripCheck() }) {
+            Text(text = "Check Bridge Event")
+        }
+        Text(text = "Bridge Codec Check: ${viewModel.codecCheckResult}")
+        Button(onClick = { viewModel.runBridgeCodecCheck() }) {
+            Text(text = "Check Bridge Codec")
+        }
+        Text(text = "Runtime Path Check: ${viewModel.runtimeCheckResult}")
+        Button(onClick = { viewModel.runRuntimePathCheck() }) {
+            Text(text = "Check Runtime Path")
+        }
         Text(text = "ASR Error Check: ${viewModel.debugCheckResult}")
         Button(onClick = { viewModel.runAsrErrorFlowCheck() }) {
             Text(text = "Check ASR Error")

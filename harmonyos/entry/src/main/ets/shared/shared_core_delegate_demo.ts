@@ -18,6 +18,8 @@ interface DemoEvent {
   type: string
   text?: string
   isFinal?: boolean
+  confidence?: number
+  now?: number
   code?: number
   message?: string
 }
@@ -54,6 +56,7 @@ const LINES: string[] = [
 ]
 
 let mode: DemoSharedCoreDelegateMode = 'off'
+let delegateRegistrationToken: number | null = null
 
 function normalize(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -219,7 +222,7 @@ function reduceSessionDriverJson(stateJson: string, eventJson: string): string {
 
 function enableDelegateWithMode(next: Exclude<DemoSharedCoreDelegateMode, 'off'>): void {
   mode = next
-  registerSharedCoreDelegateHooks({
+  delegateRegistrationToken = registerSharedCoreDelegateHooks({
     createSessionDriverStateJson,
     reduceSessionDriverJson
   })
@@ -242,7 +245,10 @@ export function enableDemoSharedCoreDelegateInvalidState(): void {
 }
 
 export function disableDemoSharedCoreDelegate(): void {
-  clearSharedCoreDelegateHooks()
+  if (delegateRegistrationToken !== null) {
+    clearSharedCoreDelegateHooks(delegateRegistrationToken)
+    delegateRegistrationToken = null
+  }
   mode = 'off'
 }
 

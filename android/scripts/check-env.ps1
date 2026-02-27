@@ -30,18 +30,60 @@ function Resolve-SdkDir {
     return ""
 }
 
+function Find-JdkCandidates {
+    $roots = @()
+    if ($env:ProgramFiles) {
+        $roots += Join-Path $env:ProgramFiles "Java"
+        $roots += Join-Path $env:ProgramFiles "Eclipse Adoptium"
+        $roots += Join-Path $env:ProgramFiles "Microsoft"
+        $roots += Join-Path $env:ProgramFiles "Android\Android Studio\jbr"
+    }
+    if ($env:LOCALAPPDATA) {
+        $roots += Join-Path $env:LOCALAPPDATA "Programs\Android Studio\jbr"
+    }
+
+    $seen = @{}
+    $result = @()
+
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { continue }
+
+        $dirs = @()
+        if (Test-Path (Join-Path $root "bin\java.exe")) {
+            $dirs += (Get-Item $root)
+        }
+        $dirs += Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue
+
+        foreach ($dir in $dirs) {
+            $full = $dir.FullName
+            if ($seen.ContainsKey($full)) { continue }
+            $seen[$full] = $true
+
+            $javaExe = Join-Path $full "bin\java.exe"
+            $modulesFile = Join-Path $full "lib\modules"
+            if ((Test-Path $javaExe) -and (Test-Path $modulesFile)) {
+                $result += $full
+            }
+        }
+    }
+
+    return $result | Sort-Object -Unique
+}
+
 function Print-Section($title) {
     Write-Host ""
     Write-Host "=== $title ==="
 }
 
 $failed = $false
+$javaFailed = $false
 
 Print-Section "JAVA"
 $resolvedJavaHome = Resolve-JavaHome
 if (-not $resolvedJavaHome) {
     Write-Host "FAIL: JAVA_HOME is not set."
     $failed = $true
+    $javaFailed = $true
 } else {
     $javaExe = Join-Path $resolvedJavaHome "bin\java.exe"
     $modulesFile = Join-Path $resolvedJavaHome "lib\modules"
@@ -50,12 +92,52 @@ if (-not $resolvedJavaHome) {
     if (-not (Test-Path $javaExe)) {
         Write-Host "FAIL: java.exe not found at $javaExe"
         $failed = $true
+        $javaFailed = $true
     } elseif (-not (Test-Path $modulesFile)) {
         Write-Host "FAIL: JDK appears incomplete (missing lib\\modules)."
         $failed = $true
+        $javaFailed = $true
     } else {
         Write-Host "PASS: JDK layout looks valid."
         & $javaExe -version
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "FAIL: java -version failed (exit $LASTEXITCODE)."
+            Write-Host "Hint: reinstall JDK 17 and update JAVA_HOME to the new path."
+            $failed = $true
+            $javaFailed = $true
+        } else {
+            Write-Host "PASS: java runtime invocation works."
+        }
+
+        $javacExe = Join-Path $resolvedJavaHome "bin\javac.exe"
+        if (-not (Test-Path $javacExe)) {
+            Write-Host "FAIL: javac.exe not found at $javacExe"
+            $failed = $true
+            $javaFailed = $true
+        } else {
+            & $javacExe -version
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "FAIL: javac -version failed (exit $LASTEXITCODE)."
+                Write-Host "Hint: reinstall JDK 17 and ensure JAVA_HOME points to a full JDK."
+                $failed = $true
+                $javaFailed = $true
+            } else {
+                Write-Host "PASS: javac invocation works."
+            }
+        }
+    }
+}
+
+if ($javaFailed) {
+    Print-Section "JAVA CANDIDATES"
+    $candidates = Find-JdkCandidates
+    if (@($candidates).Count -eq 0) {
+        Write-Host "No complete JDK candidates found in common install paths."
+    } else {
+        Write-Host "Detected complete JDK candidates:"
+        foreach ($candidate in $candidates) {
+            Write-Host "  $candidate"
+        }
     }
 }
 

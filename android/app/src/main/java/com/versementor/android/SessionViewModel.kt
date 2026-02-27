@@ -10,6 +10,9 @@ import androidx.lifecycle.viewModelScope
 import com.versementor.android.bridge.LocalKotlinBridge
 import com.versementor.android.bridge.SessionBridge
 import com.versementor.android.bridge.SharedCoreBridge
+import com.versementor.android.bridge.sharedcore.SharedCoreCodec
+import com.versementor.android.bridge.sharedcore.LocalBridgeSharedCoreRuntime
+import com.versementor.android.bridge.sharedcore.SharedCoreRuntimeHooks
 import com.versementor.android.net.HttpClient
 import com.versementor.android.net.OkHttpClientImpl
 import com.versementor.android.session.Poem
@@ -31,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class SessionViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
@@ -43,9 +47,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private val variantCacheStore = SharedPrefsVariantCacheStore(prefs)
     private val httpClient: HttpClient = OkHttpClientImpl()
     private val speech = SpeechIO(app)
+    private val sharedCoreCodec = SharedCoreCodec()
+    private val localBridgeRuntime = LocalBridgeSharedCoreRuntime(codec = sharedCoreCodec)
     private val variantApiEndpoint: String = BuildConfig.VARIANT_API_ENDPOINT.trim().trimEnd('/')
     private val sessionBridge: SessionBridge =
         if (BuildConfig.USE_SHARED_CORE_REDUCER) SharedCoreBridge() else LocalKotlinBridge()
+    private var sharedCoreHookToken: Long? = null
     private var isSpeaking = false
     private var pendingStartListening = false
     private var isManuallyPaused = false
@@ -59,12 +66,27 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     var debugCheckResult: String by mutableStateOf("-")
         private set
 
+    var runtimeCheckResult: String by mutableStateOf("-")
+        private set
+
+    var codecCheckResult: String by mutableStateOf("-")
+        private set
+
+    var eventCheckResult: String by mutableStateOf("-")
+        private set
+
+    var allBridgeCheckResult: String by mutableStateOf("-")
+        private set
+
     private var state: SessionState = buildInitialSession(
         config = buildDefaultConfig(prefs),
         poems = SamplePoems.poems
     )
 
     init {
+        if (BuildConfig.USE_SHARED_CORE_REDUCER) {
+            sharedCoreHookToken = SharedCoreRuntimeHooks.registerReduceHookIfAbsent(localBridgeRuntime::reduce)
+        }
         speech.onAsrResult = { text, isFinal, confidence ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
                 if (!uiState.sessionActive || uiState.sessionPaused) {
@@ -82,7 +104,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     awaitingSpeech = false,
                     recognizedLines = nextRecognizedLines
                 )
-                dispatch(SessionEvent.UserAsr(text, isFinal, confidence))
+                dispatch(SessionEvent.UserAsr(text, isFinal, confidence, System.currentTimeMillis()))
             }
         }
         speech.onAsrError = { code, message ->
@@ -171,7 +193,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             sessionActive = true,
             sessionPaused = false
         )
-        dispatch(SessionEvent.UserUiStart)
+        dispatch(SessionEvent.UserUiStart(System.currentTimeMillis()))
     }
 
     fun dispatch(event: SessionEvent) {
@@ -527,7 +549,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             config = state.ctx.config,
             poems = state.ctx.poems
         )
-        val started = sessionBridge.reduce(base, SessionEvent.UserUiStart)
+        val started = sessionBridge.reduce(base, SessionEvent.UserUiStart(System.currentTimeMillis()))
         val checked = sessionBridge.reduce(started.state, SessionEvent.UserAsrError(7, "no match"))
         val hasSpeak = checked.actions.any { it is SessionAction.Speak }
         val hasStartListening = checked.actions.any { it is SessionAction.StartListening }
@@ -540,10 +562,112 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 is SessionAction.FetchVariants -> "FETCH_VARIANTS"
             }
         }.ifBlank { "none" }
-        val mode = if (BuildConfig.USE_SHARED_CORE_REDUCER) "shared-core-bridge" else "local-kotlin"
-        val pass = hasSpeak && hasStartListening && checked.state.type == started.state.type
+        val trace = (sessionBridge as? SharedCoreBridge)?.getLastTrace()
+        val mode = if (BuildConfig.USE_SHARED_CORE_REDUCER) {
+            if (trace != null) "shared-core-bridge:${trace.path}/${trace.reason}" else "shared-core-bridge"
+        } else {
+            "local-kotlin"
+        }
+        val runtimePathOk = !BuildConfig.USE_SHARED_CORE_REDUCER || trace?.path == "runtime"
+        val pass = hasSpeak && hasStartListening && checked.state.type == started.state.type && runtimePathOk
         debugCheckResult = "AsrErrorCheck:${if (pass) "PASS" else "FAIL"}(${mode},${checked.state.type},$actionTypes)"
         uiState = uiState.copy(logs = uiState.logs + "Debug: $debugCheckResult")
+    }
+
+    fun runRuntimePathCheck() {
+        if (!BuildConfig.USE_SHARED_CORE_REDUCER) {
+            runtimeCheckResult = "RuntimePathCheck:SKIP(local-kotlin)"
+            uiState = uiState.copy(logs = uiState.logs + "Debug: $runtimeCheckResult")
+            return
+        }
+        val base = buildInitialSession(
+            config = state.ctx.config,
+            poems = state.ctx.poems
+        )
+        val started = sessionBridge.reduce(base, SessionEvent.UserUiStart(System.currentTimeMillis()))
+        val hasSpeak = started.actions.any { it is SessionAction.Speak }
+        val hasStartListening = started.actions.any { it is SessionAction.StartListening }
+        val trace = (sessionBridge as? SharedCoreBridge)?.getLastTrace()
+        val runtimePathOk = trace?.path == "runtime"
+        val hookOk = trace?.reason == "delegate-hook"
+        val stateOk = started.state.type == SessionStateType.WAIT_POEM_NAME
+        val pass = runtimePathOk && hookOk && stateOk && hasSpeak && hasStartListening
+        val mode = if (trace != null) "${trace.path}/${trace.reason}" else "unknown"
+        runtimeCheckResult = "RuntimePathCheck:${if (pass) "PASS" else "FAIL"}(${mode},${started.state.type})"
+        uiState = uiState.copy(logs = uiState.logs + "Debug: $runtimeCheckResult")
+    }
+
+    fun runBridgeCodecCheck() {
+        val base = buildInitialSession(
+            config = state.ctx.config,
+            poems = state.ctx.poems
+        )
+        val stateJson = sharedCoreCodec.encodeState(base)
+        val event = SessionEvent.UserUiStart(System.currentTimeMillis())
+        val eventJson = sharedCoreCodec.encodeEvent(event)
+        val outputJson = localBridgeRuntime.reduce(stateJson, eventJson)
+        if (outputJson == null) {
+            codecCheckResult = "BridgeCodecCheck:FAIL(runtime-null)"
+            uiState = uiState.copy(logs = uiState.logs + "Debug: $codecCheckResult")
+            return
+        }
+        val decodeResult = sharedCoreCodec.decodeOutputWithReason(outputJson)
+        val output = decodeResult.output
+        if (output == null) {
+            val reason = decodeResult.reason ?: "decode-null"
+            codecCheckResult = "BridgeCodecCheck:FAIL(output-$reason)"
+            uiState = uiState.copy(logs = uiState.logs + "Debug: $codecCheckResult")
+            return
+        }
+        val hasSpeak = output.actions.any { it is SessionAction.Speak }
+        val hasStartListening = output.actions.any { it is SessionAction.StartListening }
+        val stateOk = output.state.type == SessionStateType.WAIT_POEM_NAME
+        val pass = hasSpeak && hasStartListening && stateOk
+        codecCheckResult = "BridgeCodecCheck:${if (pass) "PASS" else "FAIL"}(${output.state.type})"
+        uiState = uiState.copy(logs = uiState.logs + "Debug: $codecCheckResult")
+    }
+
+    fun runBridgeEventRoundTripCheck() {
+        val now = System.currentTimeMillis()
+
+        val startEvent = SessionEvent.UserUiStart(now)
+        val startRaw = sharedCoreCodec.encodeEvent(startEvent)
+        val startDecoded = sharedCoreCodec.decodeEvent(startRaw)
+        val startOk = startDecoded is SessionEvent.UserUiStart && startDecoded.now == now
+
+        val asrEvent = SessionEvent.UserAsr("jing ye si", isFinal = true, confidence = 0.91f, now = now + 1)
+        val asrRaw = sharedCoreCodec.encodeEvent(asrEvent)
+        val asrDecoded = sharedCoreCodec.decodeEvent(asrRaw)
+        val decodedConfidence = (asrDecoded as? SessionEvent.UserAsr)?.confidence
+        val asrOk = asrDecoded is SessionEvent.UserAsr &&
+            asrDecoded.text == "jing ye si" &&
+            asrDecoded.isFinal &&
+            asrDecoded.now == now + 1 &&
+            decodedConfidence != null &&
+            abs(decodedConfidence - 0.91f) < 0.0001f
+
+        val pass = startOk && asrOk
+        eventCheckResult =
+            "BridgeEventCheck:${if (pass) "PASS" else "FAIL"}(start=${if (startOk) "ok" else "bad"},asr=${if (asrOk) "ok" else "bad"})"
+        uiState = uiState.copy(logs = uiState.logs + "Debug: $eventCheckResult")
+    }
+
+    fun runAllBridgeChecks() {
+        runBridgeEventRoundTripCheck()
+        runBridgeCodecCheck()
+        runRuntimePathCheck()
+        runAsrErrorFlowCheck()
+
+        val eventOk = eventCheckResult.startsWith("BridgeEventCheck:PASS")
+        val codecOk = codecCheckResult.startsWith("BridgeCodecCheck:PASS")
+        val runtimeOk =
+            runtimeCheckResult.startsWith("RuntimePathCheck:PASS") ||
+                runtimeCheckResult.startsWith("RuntimePathCheck:SKIP(local-kotlin)")
+        val asrOk = debugCheckResult.startsWith("AsrErrorCheck:PASS")
+        val pass = eventOk && codecOk && runtimeOk && asrOk
+        allBridgeCheckResult =
+            "AllBridgeChecks:${if (pass) "PASS" else "FAIL"}(event=${if (eventOk) "ok" else "bad"},codec=${if (codecOk) "ok" else "bad"},runtime=${if (runtimeOk) "ok" else "bad"},asr=${if (asrOk) "ok" else "bad"})"
+        uiState = uiState.copy(logs = uiState.logs + "Debug: $allBridgeCheckResult")
     }
 
     private fun text(resId: Int): String {
@@ -569,6 +693,10 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        sharedCoreHookToken?.let { token ->
+            SharedCoreRuntimeHooks.clearReduceHook(token)
+            sharedCoreHookToken = null
+        }
         speech.stopListening()
         speech.stopSpeak()
         speech.release()

@@ -13,6 +13,20 @@ export interface SessionDriverReduceRequest {
 
 export type SessionDriverReduceResponse = SessionDriverOutput
 
+const SESSION_STATE_TYPES = new Set([
+  'IDLE',
+  'SESSION_START',
+  'WAIT_POEM_NAME',
+  'CONFIRM_POEM_CANDIDATE',
+  'WAIT_DYNASTY_AUTHOR',
+  'RECITE_READY',
+  'RECITING',
+  'HINT_OFFER',
+  'HINT_GIVEN',
+  'FINISHED',
+  'EXIT'
+])
+
 function parseJson(raw: string): unknown {
   return JSON.parse(raw) as unknown
 }
@@ -25,6 +39,14 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function isPoem(value: unknown): boolean {
   if (!isObjectRecord(value)) return false
   if (typeof value.id !== 'string' || typeof value.title !== 'string') return false
@@ -33,24 +55,231 @@ function isPoem(value: unknown): boolean {
   return value.lines.every((line) => isObjectRecord(line) && typeof line.text === 'string')
 }
 
+function isPoemLineVariant(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    isNumber(value.lineIndex) &&
+    Array.isArray(value.variants) &&
+    value.variants.every((item) => typeof item === 'string')
+  )
+}
+
+function isPoemVariants(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.poemId === 'string' &&
+    Array.isArray(value.lines) &&
+    value.lines.every((line) => isPoemLineVariant(line)) &&
+    isStringArray(value.sourceTags)
+  )
+}
+
+function isPoemVariantsCacheEntry(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.poemId === 'string' &&
+    isPoemVariants(value.variants) &&
+    isNumber(value.cachedAt) &&
+    isNumber(value.expiresAt)
+  )
+}
+
+function isSourceTag(value: unknown): boolean {
+  return value === 'auto' || value === 'user' || value === 'import'
+}
+
+function isDynastyCanonical(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    isSourceTag(value.source) &&
+    isNumber(value.createdAt) &&
+    isNumber(value.updatedAt) &&
+    isNumber(value.freq)
+  )
+}
+
+function isDynastyAlias(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.alias === 'string' &&
+    typeof value.canonicalId === 'string' &&
+    isSourceTag(value.source) &&
+    isNumber(value.createdAt) &&
+    isNumber(value.updatedAt) &&
+    isNumber(value.freq)
+  )
+}
+
+function isDynastyGroup(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    Array.isArray(value.canonicalIds) &&
+    value.canonicalIds.every((id) => typeof id === 'string') &&
+    isSourceTag(value.source) &&
+    isNumber(value.createdAt) &&
+    isNumber(value.updatedAt) &&
+    isNumber(value.freq)
+  )
+}
+
+function isDynastyKB(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    Array.isArray(value.canonicals) &&
+    value.canonicals.every((item) => isDynastyCanonical(item)) &&
+    Array.isArray(value.aliases) &&
+    value.aliases.every((item) => isDynastyAlias(item)) &&
+    Array.isArray(value.groups) &&
+    value.groups.every((item) => isDynastyGroup(item))
+  )
+}
+
+function isDynastyResolveResult(value: unknown): boolean {
+  if (!isObjectRecord(value)) return false
+  if (
+    value.matchedBy !== 'canonical' &&
+    value.matchedBy !== 'alias' &&
+    value.matchedBy !== 'group' &&
+    value.matchedBy !== 'fuzzy' &&
+    value.matchedBy !== 'none'
+  ) {
+    return false
+  }
+  if (value.canonical !== undefined && !isDynastyCanonical(value.canonical)) return false
+  if (
+    value.candidates !== undefined &&
+    (!Array.isArray(value.candidates) || !value.candidates.every((item) => isDynastyCanonical(item)))
+  ) {
+    return false
+  }
+  if (value.score !== undefined && !isNumber(value.score)) return false
+  return true
+}
+
+function isAuthorEntry(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    Array.isArray(value.aliases) &&
+    value.aliases.every((alias) => typeof alias === 'string') &&
+    (value.dynastyId === undefined || typeof value.dynastyId === 'string') &&
+    isSourceTag(value.source) &&
+    isNumber(value.createdAt) &&
+    isNumber(value.updatedAt) &&
+    isNumber(value.freq)
+  )
+}
+
+function isAuthorResolveResult(value: unknown): boolean {
+  if (!isObjectRecord(value)) return false
+  if (
+    value.matchedBy !== 'primary' &&
+    value.matchedBy !== 'alias' &&
+    value.matchedBy !== 'fuzzy' &&
+    value.matchedBy !== 'none'
+  ) {
+    return false
+  }
+  if (value.author !== undefined && !isAuthorEntry(value.author)) return false
+  if (
+    value.candidates !== undefined &&
+    (!Array.isArray(value.candidates) || !value.candidates.every((item) => isAuthorEntry(item)))
+  ) {
+    return false
+  }
+  if (value.score !== undefined && !isNumber(value.score)) return false
+  if (value.hint !== undefined && typeof value.hint !== 'string') return false
+  return true
+}
+
+function isAuthorKB(value: unknown): boolean {
+  return (
+    isObjectRecord(value) &&
+    Array.isArray(value.authors) &&
+    value.authors.every((item) => isAuthorEntry(item))
+  )
+}
+
+function isSessionStateType(value: unknown): boolean {
+  return typeof value === 'string' && SESSION_STATE_TYPES.has(value)
+}
+
+function isAppConfig(value: unknown): boolean {
+  if (!isObjectRecord(value)) return false
+  if (typeof value.tonePolicy !== 'string') return false
+  if (!isBoolean(value.toneRemind)) return false
+
+  if (!isObjectRecord(value.accentTolerance)) return false
+  if (
+    !isBoolean(value.accentTolerance.an_ang) ||
+    !isBoolean(value.accentTolerance.en_eng) ||
+    !isBoolean(value.accentTolerance.in_ing) ||
+    !isBoolean(value.accentTolerance.ian_iang)
+  ) {
+    return false
+  }
+
+  if (!isObjectRecord(value.variants)) return false
+  if (
+    !isBoolean(value.variants.enableOnline) ||
+    !isNumber(value.variants.ttlDays) ||
+    !isObjectRecord(value.variants.providerWeights) ||
+    !Object.values(value.variants.providerWeights).every((v) => typeof v === 'number') ||
+    !isNumber(value.variants.maxVariantsPerLine)
+  ) {
+    return false
+  }
+
+  if (!isObjectRecord(value.timeouts)) return false
+  if (
+    !isNumber(value.timeouts.noPoemIntentExitSec) ||
+    !isNumber(value.timeouts.reciteSilenceAskHintSec) ||
+    !isNumber(value.timeouts.hintOfferWaitSec)
+  ) {
+    return false
+  }
+
+  if (!isObjectRecord(value.recite)) return false
+  if (
+    !isNumber(value.recite.passScore) ||
+    !isNumber(value.recite.partialScore) ||
+    !isNumber(value.recite.minCoverage)
+  ) {
+    return false
+  }
+
+  if (!isObjectRecord(value.ui)) return false
+  if (!isBoolean(value.ui.followSystem) || typeof value.ui.uiLang !== 'string') return false
+
+  return true
+}
+
 function isSessionDriverEvent(value: unknown): value is SessionDriverEvent {
   if (!isObjectRecord(value) || typeof value.type !== 'string') return false
   switch (value.type) {
     case 'USER_UI_START':
+      return value.now === undefined || isNumber(value.now)
     case 'USER_UI_STOP':
       return true
     case 'TICK':
-      return typeof value.now === 'number'
+      return isNumber(value.now)
     case 'USER_ASR':
       return (
         typeof value.text === 'string' &&
         typeof value.isFinal === 'boolean' &&
-        (value.confidence === undefined || typeof value.confidence === 'number')
+        (value.confidence === undefined || isNumber(value.confidence)) &&
+        (value.now === undefined || isNumber(value.now))
       )
     case 'USER_ASR_ERROR':
-      return typeof value.code === 'number' && typeof value.message === 'string'
+      return isNumber(value.code) && typeof value.message === 'string'
     case 'EV_VARIANTS_FETCH_DONE':
-      return value.entry === null || isObjectRecord(value.entry)
+      return value.entry === null || isPoemVariantsCacheEntry(value.entry)
     default:
       return false
   }
@@ -79,34 +308,41 @@ function isSessionDriverAction(value: unknown): value is SessionDriverAction {
 }
 
 function isSerializableSessionState(value: unknown): value is SerializableSessionState {
-  if (!isObjectRecord(value) || typeof value.type !== 'string') return false
+  if (!isObjectRecord(value) || !isSessionStateType(value.type)) return false
   if (!isObjectRecord(value.ctx)) return false
   const ctx = value.ctx
-  if (!isObjectRecord(ctx.config)) return false
+  if (!isAppConfig(ctx.config)) return false
   if (!Array.isArray(ctx.poems) || !ctx.poems.every((poem) => isPoem(poem))) return false
-  if (!isObjectRecord(ctx.dynastyKB) || !Array.isArray(ctx.dynastyKB.canonicals)) return false
-  if (!isObjectRecord(ctx.authorKB) || !Array.isArray(ctx.authorKB.authors)) return false
-  if (typeof ctx.currentLineIdx !== 'number') return false
+  if (!isDynastyKB(ctx.dynastyKB)) return false
+  if (!isAuthorKB(ctx.authorKB)) return false
+  if (!isNumber(ctx.currentLineIdx)) return false
   if (!Array.isArray(ctx.reciteProgress)) return false
   if (
     !ctx.reciteProgress.every(
       (item) =>
         isObjectRecord(item) &&
-        typeof item.idx === 'number' &&
+        isNumber(item.idx) &&
         typeof item.passed === 'boolean' &&
-        typeof item.score === 'number'
+        isNumber(item.score)
     )
   ) {
     return false
   }
-  if (ctx.lastUserActiveAt !== undefined && typeof ctx.lastUserActiveAt !== 'number') return false
+  if (ctx.lastUserActiveAt !== undefined && !isNumber(ctx.lastUserActiveAt)) return false
   if (!isObjectRecord(ctx.timers)) return false
-  if (ctx.timers.noPoemIntentSince !== undefined && typeof ctx.timers.noPoemIntentSince !== 'number') return false
+  if (ctx.timers.noPoemIntentSince !== undefined && !isNumber(ctx.timers.noPoemIntentSince)) return false
+  if (ctx.timers.hintOfferSince !== undefined && !isNumber(ctx.timers.hintOfferSince)) return false
   if (!isStringArray(ctx.praiseHistory)) return false
   if (ctx.selectedPoem !== undefined && !isPoem(ctx.selectedPoem)) return false
-  if (ctx.variantsCacheEntry !== undefined && ctx.variantsCacheEntry !== null && !isObjectRecord(ctx.variantsCacheEntry)) return false
-  if (ctx.dynastyResolved !== undefined && !isObjectRecord(ctx.dynastyResolved)) return false
-  if (ctx.authorResolved !== undefined && !isObjectRecord(ctx.authorResolved)) return false
+  if (
+    ctx.variantsCacheEntry !== undefined &&
+    ctx.variantsCacheEntry !== null &&
+    !isPoemVariantsCacheEntry(ctx.variantsCacheEntry)
+  ) {
+    return false
+  }
+  if (ctx.dynastyResolved !== undefined && !isDynastyResolveResult(ctx.dynastyResolved)) return false
+  if (ctx.authorResolved !== undefined && !isAuthorResolveResult(ctx.authorResolved)) return false
   return true
 }
 

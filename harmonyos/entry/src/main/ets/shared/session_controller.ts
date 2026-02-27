@@ -9,11 +9,11 @@ export type SessionShellStage =
   | 'EXIT'
 
 export type SessionShellEvent =
-  | { type: 'USER_ASR'; text: string; isFinal: boolean; confidence?: number }
+  | { type: 'USER_ASR'; text: string; isFinal: boolean; confidence?: number; now?: number }
   | { type: 'USER_ASR_ERROR'; code: number; message: string }
   | { type: 'TICK'; now: number }
   | { type: 'EV_VARIANTS_FETCH_DONE'; entry: unknown | null }
-  | { type: 'USER_UI_START' }
+  | { type: 'USER_UI_START'; now?: number }
   | { type: 'USER_UI_STOP' }
 
 export type SessionShellAction =

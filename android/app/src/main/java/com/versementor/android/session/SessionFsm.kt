@@ -25,16 +25,17 @@ data class SessionContext(
     var variantsCacheEntry: PoemVariantsCacheEntry? = null,
     var currentLineIdx: Int = 0,
     var lastUserActiveAt: Long? = null,
-    var noPoemIntentSince: Long? = null
+    var noPoemIntentSince: Long? = null,
+    var hintOfferSince: Long? = null
 )
 
 data class SessionState(val type: SessionStateType, val ctx: SessionContext)
 
 sealed class SessionEvent {
-    data class UserAsr(val text: String, val isFinal: Boolean, val confidence: Float?) : SessionEvent()
+    data class UserAsr(val text: String, val isFinal: Boolean, val confidence: Float?, val now: Long? = null) : SessionEvent()
     data class UserAsrError(val code: Int, val message: String) : SessionEvent()
     data class Tick(val now: Long) : SessionEvent()
-    data object UserUiStart : SessionEvent()
+    data class UserUiStart(val now: Long? = null) : SessionEvent()
     data object UserUiStop : SessionEvent()
     data class VariantsFetched(val entry: PoemVariantsCacheEntry?) : SessionEvent()
 }
@@ -63,12 +64,55 @@ class SessionReducer {
             return next(state.type)
         }
 
+        if (event is SessionEvent.UserUiStop && state.type != SessionStateType.IDLE && state.type != SessionStateType.EXIT) {
+            actions += SessionAction.StopListening
+            return next(SessionStateType.EXIT)
+        }
+
+        if (event is SessionEvent.UserUiStart && state.type != SessionStateType.IDLE) {
+            actions += SessionAction.Speak("你好，欢迎背诵诗词。请说出诗词题目。")
+            actions += SessionAction.StartListening
+            ctx.selectedPoem = null
+            ctx.variantsCacheEntry = null
+            ctx.currentLineIdx = 0
+            ctx.hintOfferSince = null
+            ctx.noPoemIntentSince = event.now ?: System.currentTimeMillis()
+            return next(SessionStateType.WAIT_POEM_NAME)
+        }
+
+        if (
+            event is SessionEvent.UserAsr &&
+            event.isFinal &&
+            state.type != SessionStateType.IDLE &&
+            state.type != SessionStateType.EXIT &&
+            isExitIntent(event.text)
+        ) {
+            actions += SessionAction.Speak("好的，已结束会话。")
+            actions += SessionAction.StopListening
+            return next(SessionStateType.EXIT)
+        }
+
+        if (
+            event is SessionEvent.UserAsr &&
+            event.isFinal &&
+            state.type != SessionStateType.IDLE &&
+            state.type != SessionStateType.EXIT &&
+            isRepeatIntent(event.text)
+        ) {
+            val repeatReply = buildRepeatReply(state.type, ctx)
+            if (repeatReply != null) {
+                actions += SessionAction.Speak(repeatReply)
+                actions += SessionAction.StartListening
+                return next(state.type)
+            }
+        }
+
         when (state.type) {
             SessionStateType.IDLE -> {
                 if (event is SessionEvent.UserUiStart) {
                     actions += SessionAction.Speak("你好，欢迎背诵诗词。请说出诗词题目。")
                     actions += SessionAction.StartListening
-                    val now = System.currentTimeMillis()
+                    val now = event.now ?: System.currentTimeMillis()
                     ctx.noPoemIntentSince = now
                     return next(SessionStateType.WAIT_POEM_NAME, ctx)
                 }
@@ -152,6 +196,7 @@ class SessionReducer {
                     is SessionEvent.Tick -> {
                         val last = ctx.lastUserActiveAt
                         if (last != null && event.now - last >= ctx.config.timeouts.reciteSilenceAskHintSec * 1000L) {
+                            ctx.hintOfferSince = event.now
                             actions += SessionAction.Speak("需要提示吗？")
                             actions += SessionAction.StartListening
                             return next(SessionStateType.HINT_OFFER)
@@ -160,7 +205,7 @@ class SessionReducer {
                     }
                     is SessionEvent.UserAsr -> {
                         if (!event.isFinal) return next(SessionStateType.RECITING)
-                        ctx.lastUserActiveAt = System.currentTimeMillis()
+                        ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
                         val poem = ctx.selectedPoem ?: return next(SessionStateType.EXIT)
                         val line = poem.lines.getOrNull(ctx.currentLineIdx)?.text ?: ""
                         val onlineVariants = ctx.variantsCacheEntry
@@ -195,22 +240,37 @@ class SessionReducer {
             }
 
             SessionStateType.HINT_OFFER -> {
-                if (event is SessionEvent.UserAsr && event.isFinal) {
-                    val poem = ctx.selectedPoem
-                    if (poem != null) {
-                        val line = poem.lines.getOrNull(ctx.currentLineIdx)
-                        val hint = line?.text?.take(2) ?: "提示"
-                        actions += SessionAction.Speak("提示：${hint}…")
-                        actions += SessionAction.StartListening
-                        return next(SessionStateType.HINT_GIVEN)
+                when (event) {
+                    is SessionEvent.Tick -> {
+                        val since = ctx.hintOfferSince ?: event.now.also { ctx.hintOfferSince = it }
+                        if (event.now - since >= ctx.config.timeouts.hintOfferWaitSec * 1000L) {
+                            ctx.hintOfferSince = null
+                            actions += SessionAction.Speak("好的，继续背诵。")
+                            actions += SessionAction.StartListening
+                            return next(SessionStateType.RECITING)
+                        }
+                        return next(SessionStateType.HINT_OFFER)
                     }
+                    is SessionEvent.UserAsr -> {
+                        if (!event.isFinal) return next(SessionStateType.HINT_OFFER)
+                        ctx.hintOfferSince = null
+                        val poem = ctx.selectedPoem
+                        if (poem != null) {
+                            val line = poem.lines.getOrNull(ctx.currentLineIdx)
+                            val hint = line?.text?.take(2) ?: "提示"
+                            actions += SessionAction.Speak("提示：${hint}…")
+                            actions += SessionAction.StartListening
+                            return next(SessionStateType.HINT_GIVEN)
+                        }
+                        return next(SessionStateType.HINT_OFFER)
+                    }
+                    else -> return next(SessionStateType.HINT_OFFER)
                 }
-                return next(SessionStateType.HINT_OFFER)
             }
 
             SessionStateType.HINT_GIVEN -> {
                 if (event is SessionEvent.UserAsr && event.isFinal) {
-                    return next(SessionStateType.RECITING)
+                    return reduce(SessionState(SessionStateType.RECITING, ctx), event)
                 }
                 return next(SessionStateType.HINT_GIVEN)
             }
@@ -223,7 +283,7 @@ class SessionReducer {
                         ctx.selectedPoem = null
                         ctx.variantsCacheEntry = null
                         ctx.currentLineIdx = 0
-                        ctx.noPoemIntentSince = System.currentTimeMillis()
+                        ctx.noPoemIntentSince = event.now ?: System.currentTimeMillis()
                         return next(SessionStateType.WAIT_POEM_NAME)
                     }
                     actions += SessionAction.Speak("好的，已结束会话。")
@@ -243,6 +303,34 @@ class SessionReducer {
             best = max(best, scoreLine(userText, variant))
         }
         return best
+    }
+
+    private fun isExitIntent(text: String): Boolean {
+        val raw = text.trim()
+        if (raw.isEmpty()) return false
+        return raw.contains("退出") || raw.contains("结束") || raw.contains("停止") || raw.contains("不背了")
+    }
+
+    private fun isRepeatIntent(text: String): Boolean {
+        val raw = text.trim()
+        if (raw.isEmpty()) return false
+        return raw.contains("再说一遍") || raw.contains("重复")
+    }
+
+    private fun buildRepeatReply(type: SessionStateType, ctx: SessionContext): String? {
+        return when (type) {
+            SessionStateType.WAIT_POEM_NAME -> "你好，欢迎背诵诗词。请说出诗词题目。"
+            SessionStateType.CONFIRM_POEM_CANDIDATE ->
+                if (ctx.selectedPoem != null) "你说的是《${ctx.selectedPoem!!.title}》吗？" else "请再说一次题目。"
+            SessionStateType.WAIT_DYNASTY_AUTHOR ->
+                if (ctx.selectedPoem != null) "已选择《${ctx.selectedPoem!!.title}》。请说出朝代和作者。"
+                else "请再说一次朝代和作者。"
+            SessionStateType.RECITE_READY -> "请背诵第一句。"
+            SessionStateType.RECITING, SessionStateType.HINT_GIVEN -> "请继续背诵当前句。"
+            SessionStateType.HINT_OFFER -> "需要提示吗？"
+            SessionStateType.FINISHED -> "还要再来一首吗？"
+            else -> null
+        }
     }
 
     private fun scoreLine(userText: String, target: String): Double {

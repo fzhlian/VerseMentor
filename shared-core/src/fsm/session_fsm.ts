@@ -24,6 +24,7 @@ export type SessionStateType =
 
 export interface SessionTimers {
   noPoemIntentSince?: number
+  hintOfferSince?: number
 }
 
 export interface ReciteProgressEntry {
@@ -55,11 +56,11 @@ export interface SessionState {
 }
 
 export type SessionEvent =
-  | { type: 'USER_ASR'; text: string; isFinal: boolean; confidence?: number }
+  | { type: 'USER_ASR'; text: string; isFinal: boolean; confidence?: number; now?: number }
   | { type: 'USER_ASR_ERROR'; code: number; message: string }
   | { type: 'TICK'; now: number }
   | { type: 'EV_VARIANTS_FETCH_DONE'; entry: PoemVariantsCacheEntry | null }
-  | { type: 'USER_UI_START' }
+  | { type: 'USER_UI_START'; now?: number }
   | { type: 'USER_UI_STOP' }
 
 export type SessionAction =
@@ -115,6 +116,30 @@ function makeHint(poem: Poem, idx: number): string {
   return `提示：${first}… 或 ${next}…`
 }
 
+function buildRepeatReply(stateType: SessionStateType, ctx: SessionContext): string | undefined {
+  switch (stateType) {
+    case 'WAIT_POEM_NAME':
+      return '你好，欢迎背诵诗词。请说出诗词题目。'
+    case 'CONFIRM_POEM_CANDIDATE':
+      return ctx.selectedPoem ? `你说的是《${ctx.selectedPoem.title}》吗？` : '请再说一次题目。'
+    case 'WAIT_DYNASTY_AUTHOR':
+      return ctx.selectedPoem
+        ? `已选择《${ctx.selectedPoem.title}》。请说出朝代和作者。`
+        : '请再说一次朝代和作者。'
+    case 'RECITE_READY':
+      return '请背诵第一句。'
+    case 'RECITING':
+    case 'HINT_GIVEN':
+      return '请继续背诵当前句。'
+    case 'HINT_OFFER':
+      return '需要提示吗？'
+    case 'FINISHED':
+      return '还要再来一首吗？'
+    default:
+      return undefined
+  }
+}
+
 export function sessionReducer(state: SessionState, event: SessionEvent): SessionOutput {
   const ctx = state.ctx
   const actions: SessionAction[] = []
@@ -123,6 +148,54 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     state: { type, ctx: nextCtx },
     actions
   })
+
+  const reduceRecitingAsr = (recitingCtx: SessionContext, text: string, now?: number): SessionOutput => {
+    const poem = recitingCtx.selectedPoem
+    if (!poem) return withState('EXIT', recitingCtx)
+
+    const activeNow = now ?? Date.now()
+    const pack = buildLinePack(poem, recitingCtx.currentLineIdx, recitingCtx.variantsCacheEntry)
+    const judged = judgeLine(text, pack, recitingCtx.config)
+    const nextProgress = [
+      ...recitingCtx.reciteProgress,
+      { idx: recitingCtx.currentLineIdx, passed: judged.passed, score: judged.score }
+    ]
+    const nextCtx = {
+      ...recitingCtx,
+      reciteProgress: nextProgress,
+      lastUserActiveAt: activeNow
+    }
+
+    if (judged.passed) {
+      const nextIdx = recitingCtx.currentLineIdx + 1
+      if (nextIdx >= poem.lines.length) {
+        const { praise, nextHistory } = updatePraiseHistory(recitingCtx)
+        actions.push({ type: 'SPEAK', text: `${praise} 还要再来一首吗？` })
+        return withState('FINISHED', { ...nextCtx, praiseHistory: nextHistory })
+      }
+      actions.push({ type: 'SPEAK', text: '很好，下一句。' })
+      actions.push({ type: 'START_LISTENING' })
+      return withState('RECITING', { ...nextCtx, currentLineIdx: nextIdx })
+    }
+
+    if (judged.partial) {
+      actions.push({ type: 'SPEAK', text: '接近了，再试一次。' })
+      actions.push({ type: 'START_LISTENING' })
+      return withState('RECITING', nextCtx)
+    }
+
+    const hintIntent = parseIntent(text)
+    if (hintIntent.type === IntentType.ASK_HINT) {
+      const hint = makeHint(poem, recitingCtx.currentLineIdx)
+      actions.push({ type: 'SPEAK', text: hint })
+      actions.push({ type: 'START_LISTENING' })
+      return withState('HINT_GIVEN', nextCtx)
+    }
+
+    actions.push({ type: 'SPEAK', text: '没关系，再试一次。' })
+    actions.push({ type: 'START_LISTENING' })
+    return withState('RECITING', nextCtx)
+  }
 
   if (event.type === 'USER_ASR_ERROR') {
     if (state.type === 'IDLE' || state.type === 'EXIT') {
@@ -133,22 +206,58 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     return withState(state.type)
   }
 
+  if (event.type === 'USER_UI_STOP' && state.type !== 'IDLE' && state.type !== 'EXIT') {
+    actions.push({ type: 'STOP_LISTENING' })
+    return withState('EXIT')
+  }
+
+  if (event.type === 'USER_UI_START') {
+    const baseTime = event.now
+      ?? (state.type === 'IDLE' && ctx.lastUserActiveAt !== undefined
+        ? ctx.lastUserActiveAt
+        : Date.now())
+    const nextCtx = {
+      ...ctx,
+      selectedPoem: undefined,
+      dynastyResolved: undefined,
+      authorResolved: undefined,
+      variantsCacheEntry: null,
+      currentLineIdx: 0,
+      reciteProgress: [],
+      timers: { noPoemIntentSince: baseTime }
+    }
+    actions.push({ type: 'SPEAK', text: '你好，欢迎背诵诗词。请说出诗词题目。' })
+    actions.push({ type: 'START_LISTENING' })
+    return withState('WAIT_POEM_NAME', nextCtx)
+  }
+
+  if (
+    event.type === 'USER_ASR' &&
+    event.isFinal &&
+    state.type !== 'IDLE' &&
+    state.type !== 'EXIT'
+  ) {
+    const intent = parseIntent(event.text)
+    if (intent.type === IntentType.EXIT_SESSION) {
+      actions.push({ type: 'SPEAK', text: '好的，已结束会话。' })
+      actions.push({ type: 'STOP_LISTENING' })
+      return withState('EXIT')
+    }
+    if (intent.type === IntentType.REPEAT_PROMPT) {
+      const reply = buildRepeatReply(state.type, ctx)
+      if (reply) {
+        actions.push({ type: 'SPEAK', text: reply })
+        actions.push({ type: 'START_LISTENING' })
+        return withState(state.type)
+      }
+    }
+  }
+
   switch (state.type) {
     case 'IDLE':
-      if (event.type === 'USER_UI_START') {
-        actions.push({ type: 'SPEAK', text: '你好，欢迎背诵诗词。请说出诗词题目。' })
-        actions.push({ type: 'START_LISTENING' })
-        const baseTime = ctx.lastUserActiveAt ?? Date.now()
-        const nextCtx = { ...ctx, timers: { noPoemIntentSince: baseTime } }
-        return withState('WAIT_POEM_NAME', nextCtx)
-      }
       return withState('IDLE')
 
     case 'WAIT_POEM_NAME':
-      if (event.type === 'USER_UI_STOP') {
-        actions.push({ type: 'STOP_LISTENING' })
-        return withState('EXIT')
-      }
       if (event.type === 'TICK') {
         if (!ctx.timers.noPoemIntentSince) {
           const nextCtx = { ...ctx, timers: { ...ctx.timers, noPoemIntentSince: event.now } }
@@ -233,7 +342,10 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     case 'RECITE_READY': {
       const poem = ctx.selectedPoem
       if (!poem) return withState('EXIT')
-      const nextCtx = { ...ctx, currentLineIdx: 0 }
+      const nextCtx = { ...ctx, currentLineIdx: 0, lastUserActiveAt: Date.now() }
+      if (event.type === 'USER_ASR' && event.isFinal) {
+        return reduceRecitingAsr(nextCtx, event.text, event.now)
+      }
       actions.push({ type: 'SPEAK', text: `请背诵第一句。` })
       actions.push({ type: 'START_LISTENING' })
       return withState('RECITING', nextCtx)
@@ -243,74 +355,64 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
       if (event.type === 'TICK' && ctx.lastUserActiveAt !== undefined) {
         const silence = event.now - ctx.lastUserActiveAt
         if (silence >= ctx.config.timeouts.reciteSilenceAskHintSec * 1000) {
+          const nextCtx = {
+            ...ctx,
+            timers: { ...ctx.timers, hintOfferSince: event.now }
+          }
           actions.push({ type: 'SPEAK', text: '需要提示吗？' })
           actions.push({ type: 'START_LISTENING' })
-          return withState('HINT_OFFER')
+          return withState('HINT_OFFER', nextCtx)
         }
       }
       if (event.type === 'USER_ASR' && event.isFinal) {
-        ctx.lastUserActiveAt = Date.now()
-        const poem = ctx.selectedPoem
-        if (!poem) return withState('EXIT')
-
-        const pack = buildLinePack(poem, ctx.currentLineIdx, ctx.variantsCacheEntry)
-        const judged = judgeLine(event.text, pack, ctx.config)
-        const nextProgress = [...ctx.reciteProgress, { idx: ctx.currentLineIdx, passed: judged.passed, score: judged.score }]
-        const nextCtx = { ...ctx, reciteProgress: nextProgress }
-
-        if (judged.passed) {
-          const nextIdx = ctx.currentLineIdx + 1
-          if (nextIdx >= poem.lines.length) {
-            const { praise, nextHistory } = updatePraiseHistory(ctx)
-            actions.push({ type: 'SPEAK', text: `${praise} 还要再来一首吗？` })
-            return withState('FINISHED', { ...nextCtx, praiseHistory: nextHistory })
-          }
-          actions.push({ type: 'SPEAK', text: '很好，下一句。' })
-          actions.push({ type: 'START_LISTENING' })
-          return withState('RECITING', { ...nextCtx, currentLineIdx: nextIdx })
-        }
-
-        if (judged.partial) {
-          actions.push({ type: 'SPEAK', text: '接近了，再试一次。' })
-          actions.push({ type: 'START_LISTENING' })
-          return withState('RECITING', nextCtx)
-        }
-
-        const hintIntent = parseIntent(event.text)
-        if (hintIntent.type === IntentType.ASK_HINT) {
-          const hint = makeHint(poem, ctx.currentLineIdx)
-          actions.push({ type: 'SPEAK', text: hint })
-          actions.push({ type: 'START_LISTENING' })
-          return withState('HINT_GIVEN', nextCtx)
-        }
-
-        actions.push({ type: 'SPEAK', text: '没关系，再试一次。' })
-        actions.push({ type: 'START_LISTENING' })
-        return withState('RECITING', nextCtx)
+        return reduceRecitingAsr(ctx, event.text, event.now)
       }
       return withState('RECITING')
     }
 
     case 'HINT_OFFER':
+      if (event.type === 'TICK') {
+        const since = ctx.timers.hintOfferSince ?? event.now
+        if (event.now - since >= ctx.config.timeouts.hintOfferWaitSec * 1000) {
+          const nextCtx = {
+            ...ctx,
+            timers: { ...ctx.timers, hintOfferSince: undefined }
+          }
+          actions.push({ type: 'SPEAK', text: '好的，继续背诵。' })
+          actions.push({ type: 'START_LISTENING' })
+          return withState('RECITING', nextCtx)
+        }
+        if (ctx.timers.hintOfferSince === undefined) {
+          const nextCtx = {
+            ...ctx,
+            timers: { ...ctx.timers, hintOfferSince: event.now }
+          }
+          return withState('HINT_OFFER', nextCtx)
+        }
+      }
       if (event.type === 'USER_ASR' && event.isFinal) {
         const intent = parseIntent(event.text)
+        const nextCtx = {
+          ...ctx,
+          timers: { ...ctx.timers, hintOfferSince: undefined }
+        }
         if (intent.type === IntentType.ASK_HINT) {
           const poem = ctx.selectedPoem
           if (!poem) return withState('EXIT')
           const hint = makeHint(poem, ctx.currentLineIdx)
           actions.push({ type: 'SPEAK', text: hint })
           actions.push({ type: 'START_LISTENING' })
-          return withState('HINT_GIVEN')
+          return withState('HINT_GIVEN', nextCtx)
         }
         actions.push({ type: 'SPEAK', text: '好的，继续。' })
         actions.push({ type: 'START_LISTENING' })
-        return withState('RECITING')
+        return withState('RECITING', nextCtx)
       }
       return withState('HINT_OFFER')
 
     case 'HINT_GIVEN':
       if (event.type === 'USER_ASR' && event.isFinal) {
-        return withState('RECITING')
+        return reduceRecitingAsr(ctx, event.text, event.now)
       }
       return withState('HINT_GIVEN')
 

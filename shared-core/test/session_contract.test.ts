@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest'
 import {
+  decodeSessionDriverActions,
   decodeSessionDriverEvent,
+  decodeSessionDriverState,
   decodeSessionDriverReduceResponse,
   encodeSessionDriverEvent,
   encodeSessionDriverState,
@@ -30,5 +32,33 @@ describe('session_contract', () => {
     const fromJson = decodeSessionDriverReduceResponse(jsonRaw)
 
     expect(fromJson).toEqual(direct)
+  })
+
+  test('decode rejects invalid event payload', () => {
+    expect(() => decodeSessionDriverEvent(JSON.stringify({ type: 'UNKNOWN' }))).toThrow(
+      'invalid-session-driver-event'
+    )
+  })
+
+  test('decode rejects invalid state payload', () => {
+    expect(() => decodeSessionDriverState(JSON.stringify({ type: 'IDLE', ctx: {} }))).toThrow(
+      'invalid-session-driver-state'
+    )
+  })
+
+  test('decode rejects invalid actions payload', () => {
+    expect(() => decodeSessionDriverActions(JSON.stringify([{ type: 'SPEAK' }]))).toThrow(
+      'invalid-session-driver-actions'
+    )
+  })
+
+  test('decode rejects invalid reduce response payload', () => {
+    const bad = {
+      state: { type: 'IDLE', ctx: {} },
+      actions: [{ type: 'START_LISTENING' }]
+    }
+    expect(() => decodeSessionDriverReduceResponse(JSON.stringify(bad))).toThrow(
+      'invalid-session-driver-state'
+    )
   })
 })

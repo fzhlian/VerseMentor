@@ -3,6 +3,10 @@
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,9 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
@@ -30,7 +34,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,10 +49,34 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.versementor.android.session.SessionUiState
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(hasPermission: Boolean, onStart: () -> Unit, onSettings: () -> Unit) {
+fun HomeScreen(
+    hasPermission: Boolean,
+    uiState: SessionUiState,
+    onControlTap: () -> Unit,
+    onControlLongPress: () -> Unit,
+    onSettings: () -> Unit
+) {
+    val startInteractionSource = remember { MutableInteractionSource() }
+    val isStartPressed by startInteractionSource.collectIsPressedAsState()
+    val recognizedLines = uiState.recognizedLines.takeLast(6)
+    val showStopPreview = uiState.sessionActive && !uiState.sessionPaused && isStartPressed
+    val buttonLabel = when {
+        !uiState.sessionActive -> stringResource(id = R.string.button_start)
+        uiState.sessionPaused -> stringResource(id = R.string.button_resume)
+        showStopPreview -> stringResource(id = R.string.button_stop)
+        else -> stringResource(id = R.string.button_pause)
+    }
+    val statusLine = when {
+        !hasPermission -> stringResource(id = R.string.permission_mic)
+        uiState.awaitingSpeech -> stringResource(id = R.string.waiting_input)
+        uiState.liveHeard.isNotBlank() -> uiState.liveHeard
+        else -> uiState.statusText
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Image(
             painter = androidx.compose.ui.res.painterResource(id = R.drawable.home_background),
@@ -58,7 +85,9 @@ fun HomeScreen(hasPermission: Boolean, onStart: () -> Unit, onSettings: () -> Un
             contentScale = ContentScale.Crop
         )
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -83,38 +112,75 @@ fun HomeScreen(hasPermission: Boolean, onStart: () -> Unit, onSettings: () -> Un
                         .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(20.dp))
                         .padding(18.dp)
                 ) {
-                    Text(
-                        text = stringResource(id = R.string.home_poem_placeholder),
-                        style = MaterialTheme.typography.headlineSmall,
-                        textAlign = TextAlign.Center,
-                        color = Color(0xFF1F2937),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    if (recognizedLines.isEmpty()) {
+                        Text(
+                            text = stringResource(id = R.string.home_poem_placeholder),
+                            style = MaterialTheme.typography.headlineSmall,
+                            textAlign = TextAlign.Center,
+                            color = Color(0xFF1F2937),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            recognizedLines.forEach { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = Color(0xFF1F2937),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = if (hasPermission) stringResource(id = R.string.status_idle) else stringResource(id = R.string.permission_mic),
-                    color = Color.White
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0x7A000000))
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = statusLine,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
-            Button(
-                onClick = onStart,
-                enabled = hasPermission,
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0B1F3A))
+                    .height(130.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(text = stringResource(id = R.string.start), color = Color.White)
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 20.dp)
+                        .size(width = 220.dp, height = 88.dp)
+                        .clip(RoundedCornerShape(44.dp))
+                        .combinedClickable(
+                            enabled = hasPermission,
+                            interactionSource = startInteractionSource,
+                            indication = null,
+                            onClick = onControlTap,
+                            onLongClick = onControlLongPress
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 132.dp, height = 52.dp)
+                            .clip(RoundedCornerShape(26.dp))
+                            .background(Color(0xC8F39A38))
+                    )
+                    Text(
+                        text = buttonLabel,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White
+                    )
+                }
             }
         }
     }

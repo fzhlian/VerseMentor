@@ -17,6 +17,7 @@ import com.versementor.android.session.SamplePoems
 import com.versementor.android.session.SessionAction
 import com.versementor.android.session.SessionEvent
 import com.versementor.android.session.SessionState
+import com.versementor.android.session.SessionStateType
 import com.versementor.android.session.SessionUiState
 import com.versementor.android.session.buildDefaultConfig
 import com.versementor.android.session.buildInitialSession
@@ -45,6 +46,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private val variantApiEndpoint: String = BuildConfig.VARIANT_API_ENDPOINT.trim().trimEnd('/')
     private val sessionBridge: SessionBridge =
         if (BuildConfig.USE_SHARED_CORE_REDUCER) SharedCoreBridge() else LocalKotlinBridge()
+    private var isSpeaking = false
+    private var pendingStartListening = false
+    private var isManuallyPaused = false
 
     var uiState: SessionUiState by mutableStateOf(SessionUiState())
         private set
@@ -60,38 +64,111 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     init {
         speech.onAsrResult = { text, isFinal, confidence ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (!uiState.sessionActive || uiState.sessionPaused) {
+                    return@launch
+                }
+                val heard = text.trim()
+                val nextRecognizedLines = if (isFinal && heard.isNotEmpty() && uiState.recognizedLines.lastOrNull() != heard) {
+                    uiState.recognizedLines + heard
+                } else {
+                    uiState.recognizedLines
+                }
+                uiState = uiState.copy(
+                    liveHeard = heard,
+                    lastHeard = heard,
+                    awaitingSpeech = false,
+                    recognizedLines = nextRecognizedLines
+                )
                 dispatch(SessionEvent.UserAsr(text, isFinal, confidence))
             }
         }
         speech.onSpeaking = { speaking ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
-                uiState = uiState.copy(statusText = if (speaking) "Speaking" else "Listening")
-                if (!speaking) {
-                    speech.startListening()
+                if (!uiState.sessionActive) {
+                    return@launch
+                }
+                isSpeaking = speaking
+                if (speaking) {
+                    uiState = uiState.copy(
+                        statusText = text(R.string.status_speaking),
+                        awaitingSpeech = false
+                    )
+                } else if (pendingStartListening && uiState.sessionActive && !uiState.sessionPaused && !isManuallyPaused) {
+                    pendingStartListening = false
+                    beginListening()
+                } else if (uiState.sessionPaused || isManuallyPaused) {
+                    uiState = uiState.copy(
+                        statusText = text(R.string.status_paused),
+                        awaitingSpeech = false
+                    )
+                } else {
+                    uiState = uiState.copy(
+                        statusText = resolveStatusText(state.type, uiState.awaitingSpeech)
+                    )
                 }
             }
         }
         loadSettings()
         refreshVoices()
+        uiState = uiState.copy(
+            statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false)
+        )
         viewModelScope.launch {
             while (true) {
                 delay(1000)
-                dispatch(SessionEvent.Tick(System.currentTimeMillis()))
+                if (uiState.sessionActive && !uiState.sessionPaused) {
+                    dispatch(SessionEvent.Tick(System.currentTimeMillis()))
+                }
             }
         }
     }
 
+    fun onHomeButtonTap() {
+        if (!uiState.sessionActive) {
+            startSession()
+            return
+        }
+        if (uiState.sessionPaused) {
+            resumeSessionListening()
+        } else {
+            pauseSessionListening()
+        }
+    }
+
+    fun onHomeButtonLongPress() {
+        if (uiState.sessionActive && !uiState.sessionPaused) {
+            stopSession(stopSpeak = true)
+        }
+    }
+
     fun startSession() {
+        if (uiState.sessionActive) return
+        resetStateMachine()
+        if (state.type != SessionStateType.IDLE) {
+            resetStateMachine()
+        }
+        isSpeaking = false
+        pendingStartListening = false
+        isManuallyPaused = false
+        uiState = SessionUiState(
+            statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false),
+            sessionActive = true,
+            sessionPaused = false
+        )
         dispatch(SessionEvent.UserUiStart)
     }
 
     fun dispatch(event: SessionEvent) {
+        val previousType = state.type
         val output = sessionBridge.reduce(state, event)
         state = output.state
         handleActions(output.actions)
+        if (previousType != SessionStateType.EXIT && state.type == SessionStateType.EXIT) {
+            stopSession(stopSpeak = false)
+            return
+        }
         uiState = uiState.copy(
-            statusText = state.type.name,
-            lastHeard = if (event is SessionEvent.UserAsr) "ASR: ${event.text}" else uiState.lastHeard
+            statusText = resolveStatusText(state.type, uiState.awaitingSpeech)
         )
     }
 
@@ -99,16 +176,37 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         actions.forEach { action ->
             when (action) {
                 is SessionAction.Speak -> {
-                    uiState = uiState.copy(lastSpoken = action.text, logs = uiState.logs + "TTS: ${action.text}")
+                    isSpeaking = true
+                    pendingStartListening = false
+                    uiState = uiState.copy(
+                        lastSpoken = action.text,
+                        awaitingSpeech = false,
+                        logs = uiState.logs + "TTS: ${action.text}"
+                    )
                     speech.stopListening()
                     speech.speak(action.text, settings.ttsVoiceId)
                 }
 
                 SessionAction.StartListening -> {
-                    speech.startListening()
+                    if (!uiState.sessionActive) {
+                        // Ignore reducer request when the control button is in "start" mode.
+                    } else if (uiState.sessionPaused || isManuallyPaused) {
+                        pendingStartListening = true
+                        uiState = uiState.copy(
+                            statusText = text(R.string.status_paused),
+                            awaitingSpeech = false,
+                            sessionPaused = true
+                        )
+                    } else if (isSpeaking) {
+                        pendingStartListening = true
+                    } else {
+                        beginListening()
+                    }
                 }
 
                 SessionAction.StopListening -> {
+                    pendingStartListening = false
+                    uiState = uiState.copy(awaitingSpeech = false)
                     speech.stopListening()
                 }
 
@@ -121,6 +219,64 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    private fun pauseSessionListening() {
+        isManuallyPaused = true
+        pendingStartListening = false
+        speech.stopListening()
+        uiState = uiState.copy(
+            sessionPaused = true,
+            awaitingSpeech = false,
+            statusText = text(R.string.status_paused)
+        )
+    }
+
+    private fun resumeSessionListening() {
+        isManuallyPaused = false
+        uiState = uiState.copy(sessionPaused = false)
+        if (!uiState.sessionActive || state.type == SessionStateType.IDLE || state.type == SessionStateType.EXIT) {
+            uiState = uiState.copy(statusText = resolveStatusText(state.type, awaitingSpeech = false))
+            return
+        }
+        if (isSpeaking) {
+            pendingStartListening = true
+        } else {
+            pendingStartListening = false
+            beginListening()
+        }
+    }
+
+    private fun stopSession(stopSpeak: Boolean) {
+        pendingStartListening = false
+        isManuallyPaused = false
+        isSpeaking = false
+        speech.stopListening()
+        if (stopSpeak) {
+            speech.stopSpeak()
+        }
+        resetStateMachine()
+        uiState = SessionUiState(
+            statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false),
+            sessionActive = false,
+            sessionPaused = false
+        )
+    }
+
+    private fun beginListening() {
+        uiState = uiState.copy(
+            statusText = text(R.string.waiting_input),
+            awaitingSpeech = true,
+            liveHeard = ""
+        )
+        speech.startListening()
+    }
+
+    private fun resetStateMachine() {
+        state = buildInitialSession(
+            config = state.ctx.config,
+            poems = state.ctx.poems
+        )
     }
 
     private fun fetchVariants(poem: Poem) {
@@ -348,6 +504,28 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             recite = state.ctx.config.recite
         )
         state = state.copy(ctx = state.ctx.copy(config = config))
+    }
+
+    private fun text(resId: Int): String {
+        return getApplication<Application>().getString(resId)
+    }
+
+    private fun resolveStatusText(type: SessionStateType, awaitingSpeech: Boolean): String {
+        if (awaitingSpeech) {
+            return text(R.string.waiting_input)
+        }
+        return when (type) {
+            SessionStateType.IDLE -> text(R.string.status_tap_start)
+            SessionStateType.WAIT_POEM_NAME -> text(R.string.status_wait_poem_name)
+            SessionStateType.CONFIRM_POEM_CANDIDATE -> text(R.string.status_confirm_poem)
+            SessionStateType.WAIT_DYNASTY_AUTHOR -> text(R.string.status_wait_author)
+            SessionStateType.RECITING -> text(R.string.status_reciting)
+            SessionStateType.HINT_OFFER -> text(R.string.status_hint_offer)
+            SessionStateType.HINT_GIVEN -> text(R.string.status_hint_given)
+            SessionStateType.FINISHED -> text(R.string.status_finished)
+            SessionStateType.EXIT -> text(R.string.status_exit)
+            else -> type.name
+        }
     }
 
     override fun onCleared() {

@@ -53,17 +53,10 @@ class MainActivity : ComponentActivity() {
                         composable("home") {
                             HomeScreen(
                                 hasPermission = hasPermission,
-                                onStart = {
-                                    vm.startSession()
-                                    navController.navigate("session")
-                                },
+                                uiState = vm.uiState,
+                                onControlTap = { vm.onHomeButtonTap() },
+                                onControlLongPress = { vm.onHomeButtonLongPress() },
                                 onSettings = { navController.navigate("settings") }
-                            )
-                        }
-                        composable("session") {
-                            SessionScreen(
-                                viewModel = vm,
-                                onBack = { navController.popBackStack() }
                             )
                         }
                         composable("settings") {

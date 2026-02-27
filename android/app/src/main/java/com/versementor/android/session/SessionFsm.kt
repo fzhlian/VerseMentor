@@ -272,6 +272,11 @@ data class SessionUiState(
     val statusText: String = "Idle",
     val lastSpoken: String = "",
     val lastHeard: String = "",
+    val liveHeard: String = "",
+    val recognizedLines: List<String> = emptyList(),
+    val awaitingSpeech: Boolean = false,
+    val sessionActive: Boolean = false,
+    val sessionPaused: Boolean = false,
     val logs: List<String> = emptyList()
 )
 

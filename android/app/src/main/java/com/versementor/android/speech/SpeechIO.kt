@@ -13,6 +13,7 @@ import java.util.Locale
 
 interface ISpeechIO {
     var onAsrResult: ((String, Boolean, Float?) -> Unit)?
+    var onAsrError: ((Int, String) -> Unit)?
     var onSpeaking: ((Boolean) -> Unit)?
     fun startListening()
     fun stopListening()
@@ -26,6 +27,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private val speechRecognizer: SpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
     private var tts: TextToSpeech? = null
     override var onAsrResult: ((String, Boolean, Float?) -> Unit)? = null
+    override var onAsrError: ((Int, String) -> Unit)? = null
     override var onSpeaking: ((Boolean) -> Unit)? = null
 
     init {
@@ -35,7 +37,9 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onError(error: Int) {}
+            override fun onError(error: Int) {
+                onAsrError?.invoke(error, mapAsrError(error))
+            }
             override fun onResults(results: Bundle?) {
                 val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = list?.firstOrNull() ?: return
@@ -72,9 +76,15 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-CN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
-        speechRecognizer.startListening(intent)
+        runCatching {
+            speechRecognizer.startListening(intent)
+        }.onFailure {
+            onAsrError?.invoke(-1, it.message ?: "startListening failed")
+        }
     }
 
     override fun stopListening() {
@@ -104,6 +114,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
     override fun release() {
         onAsrResult = null
+        onAsrError = null
         onSpeaking = null
         try {
             speechRecognizer.stopListening()
@@ -120,5 +131,20 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         tts?.stop()
         tts?.shutdown()
         tts = null
+    }
+
+    private fun mapAsrError(error: Int): String {
+        return when (error) {
+            SpeechRecognizer.ERROR_AUDIO -> "audio error"
+            SpeechRecognizer.ERROR_CLIENT -> "client error"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "insufficient permissions"
+            SpeechRecognizer.ERROR_NETWORK -> "network error"
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network timeout"
+            SpeechRecognizer.ERROR_NO_MATCH -> "no match"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "recognizer busy"
+            SpeechRecognizer.ERROR_SERVER -> "server error"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "speech timeout"
+            else -> "error code $error"
+        }
     }
 }

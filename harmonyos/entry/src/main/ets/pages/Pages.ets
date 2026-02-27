@@ -106,14 +106,20 @@ struct SessionPage {
   }
 
   private startListening() {
-    this.speech.startListening({ locale: 'zh-CN', partialResults: true })
+    const dbg = this.speech.getDebugState()
+    if (!dbg.listening) {
+      this.speech.startListening({ locale: 'zh-CN', partialResults: true })
+    }
     this.listening = true
     this.status = 'Listening'
     this.refreshSpeechDebug()
   }
 
   private stopListening() {
-    this.speech.stopListening()
+    const dbg = this.speech.getDebugState()
+    if (dbg.listening) {
+      this.speech.stopListening()
+    }
     this.listening = false
     this.status = 'Idle'
     this.refreshSpeechDebug()
@@ -138,8 +144,8 @@ struct SessionPage {
 
   private stopSpeak() {
     this.speech.stopSpeak()
-    this.status = this.listening ? 'Listening' : 'Idle'
     this.refreshSpeechDebug()
+    this.status = this.listening ? 'Listening' : 'Idle'
   }
 
   private startSession() {
@@ -254,13 +260,14 @@ struct SessionPage {
   private stopAutoScript() {
     this.speech.stopMockScript()
     this.autoScenario = '-'
-    this.status = this.listening ? 'Listening' : 'Idle'
     this.refreshSpeechDebug()
+    this.status = this.listening ? 'Listening' : 'Idle'
   }
 
   private onAutoScriptStateChanged(running: boolean, pendingTimers: number) {
     this.autoScriptRunning = running
     this.autoScriptPendingTimers = pendingTimers
+    this.refreshSpeechDebug()
     if (!running && pendingTimers === 0 && this.status.startsWith('AutoScript:')) {
       this.autoScenario = '-'
       this.status = this.listening ? 'Listening' : 'Idle'
@@ -269,8 +276,12 @@ struct SessionPage {
 
   private refreshSpeechDebug() {
     const dbg = this.speech.getDebugState()
+    this.listening = dbg.listening
     this.autoScriptRunning = dbg.mockScriptRunning
     this.autoScriptPendingTimers = dbg.pendingScriptTimers
+    if (this.status === 'Idle' || this.status === 'Listening') {
+      this.status = this.listening ? 'Listening' : 'Idle'
+    }
   }
 
   private syncDelegateState() {

@@ -32,6 +32,7 @@ data class SessionState(val type: SessionStateType, val ctx: SessionContext)
 
 sealed class SessionEvent {
     data class UserAsr(val text: String, val isFinal: Boolean, val confidence: Float?) : SessionEvent()
+    data class UserAsrError(val code: Int, val message: String) : SessionEvent()
     data class Tick(val now: Long) : SessionEvent()
     data object UserUiStart : SessionEvent()
     data object UserUiStop : SessionEvent()
@@ -52,6 +53,15 @@ class SessionReducer {
         val actions = mutableListOf<SessionAction>()
 
         fun next(type: SessionStateType, update: SessionContext = ctx) = SessionOutput(SessionState(type, update), actions)
+
+        if (event is SessionEvent.UserAsrError) {
+            if (state.type == SessionStateType.IDLE || state.type == SessionStateType.EXIT) {
+                return next(state.type)
+            }
+            actions += SessionAction.Speak("语音识别异常：${event.message}。请再说一次。")
+            actions += SessionAction.StartListening
+            return next(state.type)
+        }
 
         when (state.type) {
             SessionStateType.IDLE -> {

@@ -10,7 +10,7 @@ import {
   getDemoSharedCoreDelegateMode,
   isDemoSharedCoreDelegateEnabled
 } from '../shared/shared_core_delegate_demo'
-import type { IMockSpeechIO, MockAsrScriptStep } from '../shared/speech'
+import type { IMockSpeechIO, MockAsrScriptStep, SpeechAsrError } from '../shared/speech'
 
 const SETTINGS_KEY = 'vm.shell.settings'
 type DelegateMode = 'off' | 'normal' | 'invalid-json' | 'invalid-actions' | 'invalid-state'
@@ -54,6 +54,8 @@ struct SessionPage {
   @State reciteProgress: string = '0/0'
   @State expectedLine: string = '-'
   @State listening: boolean = false
+  @State speaking: boolean = false
+  @State lastAsrError: string = '-'
   @State lastHeard: string = '-'
   @State lastSpoken: string = '-'
   @State lastReply: string = '-'
@@ -70,6 +72,12 @@ struct SessionPage {
         isFinal: result.isFinal === true,
         confidence: result.confidence
       })
+    })
+    this.speech.onAsrError((error) => {
+      this.onAsrError(error)
+    })
+    this.speech.onSpeakingStateChange((speaking) => {
+      this.onSpeakingStateChanged(speaking)
     })
     this.speech.listVoices().then((list) => {
       this.voices = list.map((v) => v.name).join(', ')
@@ -142,6 +150,35 @@ struct SessionPage {
     this.speech.mockRecognize('hint', true, 0.9)
   }
 
+  private simulateAsrError() {
+    this.speech.mockError(7, 'no match')
+  }
+
+  private onAsrError(error: SpeechAsrError) {
+    this.lastAsrError = `${error.code}:${error.message}`
+    this.dispatchEvent({
+      type: 'USER_ASR_ERROR',
+      code: error.code,
+      message: error.message
+    })
+    if (!this.speaking && this.status !== 'Speaking') {
+      this.status = 'AsrError'
+    }
+  }
+
+  private onSpeakingStateChanged(speaking: boolean) {
+    this.speaking = speaking
+    if (speaking) {
+      if (this.status === 'Idle' || this.status === 'Listening' || this.status === 'Speaking') {
+        this.status = 'Speaking'
+      }
+      return
+    }
+    if (this.status === 'Speaking') {
+      this.status = this.listening ? 'Listening' : 'Idle'
+    }
+  }
+
   private stopSpeak() {
     this.speech.stopSpeak()
     this.refreshSpeechDebug()
@@ -200,6 +237,7 @@ struct SessionPage {
   private runAutoScript(scenario: string, steps: MockAsrScriptStep[]) {
     this.startSession()
     this.autoScenario = scenario
+    this.lastAsrError = '-'
     this.speech.playMockScript(steps, {
       startDelayMs: 900,
       autoStartListening: true,
@@ -244,8 +282,14 @@ struct SessionPage {
     ])
   }
 
+  private prepareDelegateRuntime() {
+    this.controller.setRuntimeEnabled(true)
+    this.activateDelegateMode('normal', false)
+    this.simulateTick()
+  }
+
   private runAutoScriptDelegate() {
-    this.enableDelegate()
+    this.prepareDelegateRuntime()
     this.runAutoScript('Delegate', [
       { text: 'Jing', isFinal: false, confidence: 0.7, delayMs: 900 },
       { text: 'Jing Ye Si', isFinal: true, confidence: 0.95, delayMs: 1000 },
@@ -254,6 +298,23 @@ struct SessionPage {
       { text: 'yi shi di shang shuang', isFinal: true, confidence: 0.95, delayMs: 900 },
       { text: 'ju tou wang ming yue', isFinal: true, confidence: 0.95, delayMs: 900 },
       { text: 'di tou si gu xiang', isFinal: true, confidence: 0.95, delayMs: 900 }
+    ])
+  }
+
+  private runAutoScriptError() {
+    this.runAutoScript('Error', [
+      { text: 'Jing', isFinal: false, confidence: 0.7, delayMs: 900 },
+      { text: 'Jing Ye Si', isFinal: true, confidence: 0.95, delayMs: 1000 },
+      { kind: 'error', code: 7, message: 'no match', delayMs: 900 }
+    ])
+  }
+
+  private runAutoScriptErrorDelegate() {
+    this.prepareDelegateRuntime()
+    this.runAutoScript('ErrDelegate', [
+      { text: 'Jing', isFinal: false, confidence: 0.7, delayMs: 900 },
+      { text: 'Jing Ye Si', isFinal: true, confidence: 0.95, delayMs: 1000 },
+      { kind: 'error', code: 7, message: 'no match', delayMs: 900 }
     ])
   }
 
@@ -277,9 +338,14 @@ struct SessionPage {
   private refreshSpeechDebug() {
     const dbg = this.speech.getDebugState()
     this.listening = dbg.listening
+    this.speaking = dbg.speaking
     this.autoScriptRunning = dbg.mockScriptRunning
     this.autoScriptPendingTimers = dbg.pendingScriptTimers
-    if (this.status === 'Idle' || this.status === 'Listening') {
+    if (this.speaking && (this.status === 'Idle' || this.status === 'Listening' || this.status === 'Speaking')) {
+      this.status = 'Speaking'
+      return
+    }
+    if (this.status === 'Idle' || this.status === 'Listening' || this.status === 'Speaking') {
       this.status = this.listening ? 'Listening' : 'Idle'
     }
   }
@@ -379,6 +445,29 @@ struct SessionPage {
     this.runFaultCheck('BadState', 'invalid-state', 'runtime-state-invalid')
   }
 
+  private executeAsrErrorRuntimeCheck(): string {
+    const previousRuntimeEnabled = this.runtimeEnabled
+    const previousDelegateMode = this.toDelegateMode(this.delegateMode)
+    this.controller.resetDebugStats()
+    this.controller.setRuntimeEnabled(true)
+    this.activateDelegateMode('normal', false)
+    this.dispatchEvent({ type: 'USER_ASR_ERROR', code: 7, message: 'no match' })
+    const snapshot = this.controller.getSnapshot()
+    const reasonOk = snapshot.runtimeFallbackReason === '-'
+    const pathOk = snapshot.reducerPath === 'runtime' && snapshot.runtimeMode !== 'local'
+    const eventOk = snapshot.lastEventType === 'USER_ASR_ERROR'
+    const result =
+      `AsrErrorRuntime:${reasonOk && pathOk && eventOk ? 'PASS' : 'FAIL'}(` +
+      `${snapshot.runtimeFallbackReason},${snapshot.reducerPath}/${snapshot.runtimeMode})`
+    this.restoreCheckContext(previousRuntimeEnabled, previousDelegateMode)
+    return result
+  }
+
+  private runFaultCheckAsrError() {
+    this.faultCheckResult = this.executeAsrErrorRuntimeCheck()
+    this.status = 'FaultCheck:AsrErrorRuntime'
+  }
+
   private executeRuntimeOnCheck(): string {
     const previousRuntimeEnabled = this.runtimeEnabled
     const previousDelegateMode = this.toDelegateMode(this.delegateMode)
@@ -426,6 +515,7 @@ struct SessionPage {
   private runFaultCheckAll() {
     const lines: string[] = [
       this.executeRuntimeOnCheck(),
+      this.executeAsrErrorRuntimeCheck(),
       this.executeFaultCheck('BadJson', 'invalid-json', 'runtime-invalid-json'),
       this.executeFaultCheck('BadActions', 'invalid-actions', 'runtime-actions-invalid'),
       this.executeFaultCheck('BadState', 'invalid-state', 'runtime-state-invalid'),
@@ -489,7 +579,9 @@ struct SessionPage {
       Text(`Poem: ${this.selectedPoem}`).fontSize(12)
       Text(`Progress: ${this.reciteProgress}`).fontSize(12)
       Text(`Expected line: ${this.expectedLine}`).fontSize(12)
+      Text(`Speaking: ${this.speaking}`).fontSize(12)
       Text(`Voices: ${this.voices}`).fontSize(12)
+      Text(`Last ASR error: ${this.lastAsrError}`).fontSize(12)
       Text(`Last heard: ${this.lastHeard}`).fontSize(12)
       Text(`Last reply: ${this.lastReply}`).fontSize(12)
       Text(`Last spoken: ${this.lastSpoken}`).fontSize(12)
@@ -514,6 +606,7 @@ struct SessionPage {
       }
       Row({ space: 8 }) {
         Button('Check Runtime On').onClick(() => this.runFaultCheckRuntimeOn())
+        Button('Check ASR Error').onClick(() => this.runFaultCheckAsrError())
         Button('Check Bad JSON').onClick(() => this.runFaultCheckBadJson())
         Button('Check Bad Actions').onClick(() => this.runFaultCheckBadActions())
         Button('Check Bad State').onClick(() => this.runFaultCheckBadState())
@@ -525,6 +618,8 @@ struct SessionPage {
         Button('Auto Hint').onClick(() => this.runAutoScriptHint())
         Button('Auto Stop').onClick(() => this.runAutoScriptStop())
         Button('Auto Delegate').onClick(() => this.runAutoScriptDelegate())
+        Button('Auto Error').onClick(() => this.runAutoScriptError())
+        Button('Auto ErrDelegate').onClick(() => this.runAutoScriptErrorDelegate())
       }
       Row({ space: 8 }) {
         Button('Stop Auto Script').onClick(() => this.stopAutoScript())
@@ -536,6 +631,7 @@ struct SessionPage {
       Row({ space: 8 }) {
         Button('ASR Meta').onClick(() => this.simulateMetaAsr())
         Button('ASR Hint').onClick(() => this.simulateHintAsr())
+        Button('ASR Error').onClick(() => this.simulateAsrError())
       }
       Row({ space: 8 }) {
         Button('Start Listening').onClick(() => this.startListening())

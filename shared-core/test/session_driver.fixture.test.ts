@@ -20,7 +20,8 @@ const TEXT = {
   TITLE_CONFIRM: '\u4f60\u8bf4\u7684\u662f\u300a\u9759\u591c\u601d\u300b\u5417\uff1f',
   TITLE_TIMEOUT:
     '\u6682\u65f6\u6ca1\u6709\u8bc6\u522b\u5230\u8bd7\u8bcd\u9898\u76ee\uff0c\u5148\u7ed3\u675f\u4f1a\u8bdd\u3002',
-  HINT_OFFER: '\u9700\u8981\u63d0\u793a\u5417\uff1f'
+  HINT_OFFER: '\u9700\u8981\u63d0\u793a\u5417\uff1f',
+  ASR_ERROR_RETRY: '\u8bed\u97f3\u8bc6\u522b\u5f02\u5e38\uff1ano match\u3002\u8bf7\u518d\u8bf4\u4e00\u6b21\u3002'
 }
 
 type TraceEntry = {
@@ -161,6 +162,27 @@ describe('session_driver fixture', () => {
       actionTypes: ['SPEAK', 'START_LISTENING'],
       speak: [TEXT.HINT_OFFER],
       selectedPoemTitle: TEXT.TITLE,
+      currentLineIdx: 0
+    })
+  })
+
+  test('asr error fixture: asks user to retry on active session', () => {
+    const initial = createSessionDriverState({
+      now: FIXED_NOW,
+      lastUserActiveAt: FIXED_NOW
+    })
+
+    const trace = replay(initial, [
+      { type: 'USER_UI_START' },
+      { type: 'USER_ASR_ERROR', code: 7, message: 'no match' }
+    ])
+
+    expect(trace[1]).toEqual({
+      event: 'USER_ASR_ERROR',
+      state: 'WAIT_POEM_NAME',
+      actionTypes: ['SPEAK', 'START_LISTENING'],
+      speak: [TEXT.ASR_ERROR_RETRY],
+      selectedPoemTitle: null,
       currentLineIdx: 0
     })
   })

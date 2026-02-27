@@ -359,50 +359,82 @@ function isSourceTag(value: unknown): value is SourceTag {
 
 function sanitizeCanonicals(value: unknown): DynastyCanonical[] {
   if (!Array.isArray(value)) return []
-  return value
-    .filter((item): item is Record<string, unknown> => isObjectRecord(item))
-    .filter(
-      (item): item is DynastyCanonical =>
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        isSourceTag(item.source) &&
-        typeof item.createdAt === 'number' &&
-        typeof item.updatedAt === 'number' &&
-        typeof item.freq === 'number'
-    )
+  const out: DynastyCanonical[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) continue
+    const id = item.id
+    const name = item.name
+    const source = item.source
+    const createdAt = item.createdAt
+    const updatedAt = item.updatedAt
+    const freq = item.freq
+    if (
+      typeof id === 'string' &&
+      typeof name === 'string' &&
+      isSourceTag(source) &&
+      typeof createdAt === 'number' &&
+      typeof updatedAt === 'number' &&
+      typeof freq === 'number'
+    ) {
+      out.push({ id, name, source, createdAt, updatedAt, freq })
+    }
+  }
+  return out
 }
 
 function sanitizeAliases(value: unknown): DynastyAlias[] {
   if (!Array.isArray(value)) return []
-  return value
-    .filter((item): item is Record<string, unknown> => isObjectRecord(item))
-    .filter(
-      (item): item is DynastyAlias =>
-        typeof item.id === 'string' &&
-        typeof item.alias === 'string' &&
-        typeof item.canonicalId === 'string' &&
-        isSourceTag(item.source) &&
-        typeof item.createdAt === 'number' &&
-        typeof item.updatedAt === 'number' &&
-        typeof item.freq === 'number'
-    )
+  const out: DynastyAlias[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) continue
+    const id = item.id
+    const alias = item.alias
+    const canonicalId = item.canonicalId
+    const source = item.source
+    const createdAt = item.createdAt
+    const updatedAt = item.updatedAt
+    const freq = item.freq
+    if (
+      typeof id === 'string' &&
+      typeof alias === 'string' &&
+      typeof canonicalId === 'string' &&
+      isSourceTag(source) &&
+      typeof createdAt === 'number' &&
+      typeof updatedAt === 'number' &&
+      typeof freq === 'number'
+    ) {
+      out.push({ id, alias, canonicalId, source, createdAt, updatedAt, freq })
+    }
+  }
+  return out
 }
 
 function sanitizeGroups(value: unknown): DynastyGroup[] {
   if (!Array.isArray(value)) return []
-  return value
-    .filter((item): item is Record<string, unknown> => isObjectRecord(item))
-    .filter(
-      (item): item is DynastyGroup =>
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        Array.isArray(item.canonicalIds) &&
-        item.canonicalIds.every((id) => typeof id === 'string') &&
-        isSourceTag(item.source) &&
-        typeof item.createdAt === 'number' &&
-        typeof item.updatedAt === 'number' &&
-        typeof item.freq === 'number'
-    )
+  const out: DynastyGroup[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) continue
+    const id = item.id
+    const name = item.name
+    const canonicalIds = item.canonicalIds
+    const source = item.source
+    const createdAt = item.createdAt
+    const updatedAt = item.updatedAt
+    const freq = item.freq
+    if (
+      typeof id === 'string' &&
+      typeof name === 'string' &&
+      Array.isArray(canonicalIds) &&
+      canonicalIds.every((canonicalId) => typeof canonicalId === 'string') &&
+      isSourceTag(source) &&
+      typeof createdAt === 'number' &&
+      typeof updatedAt === 'number' &&
+      typeof freq === 'number'
+    ) {
+      out.push({ id, name, canonicalIds, source, createdAt, updatedAt, freq })
+    }
+  }
+  return out
 }
 
 export function deserializeDynastyKB(raw: string): DynastyKB {

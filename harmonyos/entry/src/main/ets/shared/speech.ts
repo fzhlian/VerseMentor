@@ -4,12 +4,27 @@ export interface SpeechAsrResult {
   isFinal?: boolean
 }
 
-export interface MockAsrScriptStep {
+export interface SpeechAsrError {
+  code: number
+  message: string
+}
+
+export interface MockAsrScriptAsrStep {
+  kind?: 'asr'
   text: string
   isFinal?: boolean
   confidence?: number
   delayMs?: number
 }
+
+export interface MockAsrScriptErrorStep {
+  kind: 'error'
+  code?: number
+  message?: string
+  delayMs?: number
+}
+
+export type MockAsrScriptStep = MockAsrScriptAsrStep | MockAsrScriptErrorStep
 
 export interface MockAsrScriptOptions {
   startDelayMs?: number
@@ -51,6 +66,8 @@ export interface ISpeechIO {
   startListening(options: SpeechListenOptions): void
   stopListening(): void
   onAsrResult(handler: (result: SpeechAsrResult) => void): void
+  onAsrError(handler: (error: SpeechAsrError) => void): void
+  onSpeakingStateChange(handler: (speaking: boolean) => void): void
   speak(text: string, options?: SpeakOptions): void
   stopSpeak(): void
   listVoices(): Promise<SpeechVoice[]>
@@ -58,6 +75,7 @@ export interface ISpeechIO {
 
 export interface IMockSpeechIO extends ISpeechIO {
   mockRecognize(text: string, isFinal?: boolean, confidence?: number): void
+  mockError(code?: number, message?: string): void
   playMockScript(steps: MockAsrScriptStep[], options?: MockAsrScriptOptions): void
   stopMockScript(): void
   onMockScriptStateChange(handler: (running: boolean, pendingTimers: number) => void): void

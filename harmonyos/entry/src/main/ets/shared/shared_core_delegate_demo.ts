@@ -18,6 +18,8 @@ interface DemoEvent {
   type: string
   text?: string
   isFinal?: boolean
+  code?: number
+  message?: string
 }
 
 interface DemoAction {
@@ -123,6 +125,13 @@ function reduce(state: DemoState, event: DemoEvent): DemoOutput {
 
   if (event.type === 'USER_UI_STOP') {
     return speakAndStop({ ...state, type: 'EXIT' }, 'session ended')
+  }
+
+  if (event.type === 'USER_ASR_ERROR') {
+    if (state.type === 'IDLE' || state.type === 'EXIT') {
+      return { state, actions: [] }
+    }
+    return speakAndListen(state, `asr error: ${event.message ?? 'unknown'}, please repeat`)
   }
 
   if (event.type !== 'USER_ASR' || event.isFinal !== true) {

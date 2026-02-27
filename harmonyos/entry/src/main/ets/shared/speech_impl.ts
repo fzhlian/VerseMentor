@@ -1,4 +1,6 @@
 import type {
+  MockAsrScriptErrorStep,
+  SpeechAsrError,
   IMockSpeechIO,
   MockAsrScriptOptions,
   MockAsrScriptStep,
@@ -18,9 +20,11 @@ const BUILTIN_VOICES: SpeechVoice[] = [
 ]
 
 type MockScriptStateHandler = (running: boolean, pendingTimers: number) => void
+type SpeakingStateHandler = (speaking: boolean) => void
 
 export class HarmonySpeechIO implements IMockSpeechIO {
   private handler?: (result: SpeechAsrResult) => void
+  private asrErrorHandler?: (error: SpeechAsrError) => void
   private listening = false
   private speaking = false
   private listenOptions?: SpeechListenOptions
@@ -28,7 +32,11 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   private lastVoiceId?: string
   private mockScriptRunning = false
   private mockScriptTimerIds: number[] = []
+  private mockScriptRunId = 0
   private scriptStateHandler?: MockScriptStateHandler
+  private speakingStateHandler?: SpeakingStateHandler
+  private speakTimerId: number | null = null
+  private speakRunId = 0
 
   startListening(options: SpeechListenOptions): void {
     this.listenOptions = options
@@ -44,6 +52,15 @@ export class HarmonySpeechIO implements IMockSpeechIO {
     this.handler = handler
   }
 
+  onAsrError(handler: (error: SpeechAsrError) => void): void {
+    this.asrErrorHandler = handler
+  }
+
+  onSpeakingStateChange(handler: (speaking: boolean) => void): void {
+    this.speakingStateHandler = handler
+    this.notifySpeakingState()
+  }
+
   onMockScriptStateChange(handler: MockScriptStateHandler): void {
     this.scriptStateHandler = handler
     this.notifyMockScriptState()
@@ -52,11 +69,35 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   speak(text: string, options?: SpeakOptions): void {
     this.lastSpokenText = text
     this.lastVoiceId = options?.voiceId
-    this.speaking = text.trim().length > 0
+    this.clearSpeakTimer()
+
+    const trimmed = text.trim()
+    if (trimmed.length === 0) {
+      this.speaking = false
+      this.notifySpeakingState()
+      return
+    }
+
+    this.speaking = true
+    this.notifySpeakingState()
+
+    const runId = this.speakRunId + 1
+    this.speakRunId = runId
+    const durationMs = this.estimateSpeakDurationMs(trimmed, options?.rate)
+    this.speakTimerId = setTimeout(() => {
+      if (runId !== this.speakRunId) return
+      this.speakTimerId = null
+      this.speaking = false
+      this.notifySpeakingState()
+    }, durationMs)
   }
 
   stopSpeak(): void {
+    this.speakRunId += 1
+    this.clearSpeakTimer()
+    if (!this.speaking) return
     this.speaking = false
+    this.notifySpeakingState()
   }
 
   async listVoices(): Promise<SpeechVoice[]> {
@@ -67,10 +108,16 @@ export class HarmonySpeechIO implements IMockSpeechIO {
     this.emitMockAsrResult({ text, isFinal, confidence })
   }
 
+  mockError(code: number = -1, message: string = 'mock asr error'): void {
+    this.emitMockAsrError({ code, message })
+  }
+
   playMockScript(steps: MockAsrScriptStep[], options: MockAsrScriptOptions = {}): void {
     this.stopMockScript()
 
     if (steps.length === 0) return
+
+    const runId = this.mockScriptRunId
 
     if (options.autoStartListening === true && !this.listening) {
       this.startListening({
@@ -84,7 +131,17 @@ export class HarmonySpeechIO implements IMockSpeechIO {
     this.notifyMockScriptState()
 
     steps.forEach((step) => {
-      const timerId = setTimeout(() => {
+      let timerId = 0
+      timerId = setTimeout(() => {
+        if (runId !== this.mockScriptRunId) return
+        this.removeMockScriptTimer(timerId)
+        if (this.isErrorStep(step)) {
+          this.emitMockAsrError({
+            code: step.code ?? -1,
+            message: step.message ?? 'mock asr error'
+          })
+          return
+        }
         this.emitMockAsrResult({
           text: step.text,
           isFinal: step.isFinal ?? true,
@@ -96,9 +153,11 @@ export class HarmonySpeechIO implements IMockSpeechIO {
       this.notifyMockScriptState()
     })
 
-    const finishTimerId = setTimeout(() => {
+    let finishTimerId = 0
+    finishTimerId = setTimeout(() => {
+      if (runId !== this.mockScriptRunId) return
+      this.removeMockScriptTimer(finishTimerId, false)
       this.mockScriptRunning = false
-      this.mockScriptTimerIds = []
       this.notifyMockScriptState()
     }, elapsed + 50)
     this.mockScriptTimerIds.push(finishTimerId)
@@ -106,6 +165,7 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   }
 
   stopMockScript(): void {
+    this.mockScriptRunId += 1
     this.mockScriptTimerIds.forEach((id) => clearTimeout(id))
     this.mockScriptTimerIds = []
     this.mockScriptRunning = false
@@ -115,6 +175,14 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   emitMockAsrResult(result: SpeechAsrResult): void {
     if (!this.listening || !this.handler) return
     this.handler(result)
+  }
+
+  emitMockAsrError(error: SpeechAsrError): void {
+    this.listening = false
+    this.stopMockScript()
+    if (this.asrErrorHandler) {
+      this.asrErrorHandler(error)
+    }
   }
 
   getDebugState(): SpeechDebugState {
@@ -132,5 +200,38 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   private notifyMockScriptState(): void {
     if (!this.scriptStateHandler) return
     this.scriptStateHandler(this.mockScriptRunning, this.mockScriptTimerIds.length)
+  }
+
+  private removeMockScriptTimer(timerId: number, notify: boolean = true): void {
+    const index = this.mockScriptTimerIds.indexOf(timerId)
+    if (index < 0) return
+    this.mockScriptTimerIds.splice(index, 1)
+    if (notify) {
+      this.notifyMockScriptState()
+    }
+  }
+
+  private isErrorStep(step: MockAsrScriptStep): step is MockAsrScriptErrorStep {
+    return step.kind === 'error'
+  }
+
+  private clearSpeakTimer(): void {
+    if (this.speakTimerId === null) return
+    clearTimeout(this.speakTimerId)
+    this.speakTimerId = null
+  }
+
+  private estimateSpeakDurationMs(text: string, rate?: number): number {
+    const safeRate = typeof rate === 'number' && rate > 0 ? rate : 1
+    const baseMs = text.length * 110
+    const adjusted = Math.floor(baseMs / safeRate)
+    if (adjusted < 500) return 500
+    if (adjusted > 7000) return 7000
+    return adjusted
+  }
+
+  private notifySpeakingState(): void {
+    if (!this.speakingStateHandler) return
+    this.speakingStateHandler(this.speaking)
   }
 }

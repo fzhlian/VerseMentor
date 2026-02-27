@@ -47,6 +47,8 @@ function isSessionDriverEvent(value: unknown): value is SessionDriverEvent {
         typeof value.isFinal === 'boolean' &&
         (value.confidence === undefined || typeof value.confidence === 'number')
       )
+    case 'USER_ASR_ERROR':
+      return typeof value.code === 'number' && typeof value.message === 'string'
     case 'EV_VARIANTS_FETCH_DONE':
       return value.entry === null || isObjectRecord(value.entry)
     default:

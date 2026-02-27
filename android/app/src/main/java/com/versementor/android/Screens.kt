@@ -339,6 +339,13 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
                 Text(text = stringResource(id = R.string.add))
             }
         }
+
+        Divider()
+        Text(text = "Debug")
+        Text(text = "ASR Error Check: ${viewModel.debugCheckResult}")
+        Button(onClick = { viewModel.runAsrErrorFlowCheck() }) {
+            Text(text = "Check ASR Error")
+        }
     }
 }
 

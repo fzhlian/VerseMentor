@@ -56,6 +56,7 @@ export interface SessionState {
 
 export type SessionEvent =
   | { type: 'USER_ASR'; text: string; isFinal: boolean; confidence?: number }
+  | { type: 'USER_ASR_ERROR'; code: number; message: string }
   | { type: 'TICK'; now: number }
   | { type: 'EV_VARIANTS_FETCH_DONE'; entry: PoemVariantsCacheEntry | null }
   | { type: 'USER_UI_START' }
@@ -122,6 +123,15 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     state: { type, ctx: nextCtx },
     actions
   })
+
+  if (event.type === 'USER_ASR_ERROR') {
+    if (state.type === 'IDLE' || state.type === 'EXIT') {
+      return withState(state.type)
+    }
+    actions.push({ type: 'SPEAK', text: `语音识别异常：${event.message}。请再说一次。` })
+    actions.push({ type: 'START_LISTENING' })
+    return withState(state.type)
+  }
 
   switch (state.type) {
     case 'IDLE':

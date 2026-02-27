@@ -68,4 +68,20 @@ describe('session_fsm', () => {
     })
     expect(updated.state.type).toBe('WAIT_DYNASTY_AUTHOR')
   })
+
+  test('asr error keeps state and asks user to retry', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const started = sessionReducer(initial, { type: 'USER_UI_START' })
+    const afterError = sessionReducer(started.state, {
+      type: 'USER_ASR_ERROR',
+      code: 7,
+      message: 'no match'
+    })
+    expect(afterError.state.type).toBe('WAIT_POEM_NAME')
+    expect(afterError.actions).toEqual([
+      { type: 'SPEAK', text: '语音识别异常：no match。请再说一次。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
 })

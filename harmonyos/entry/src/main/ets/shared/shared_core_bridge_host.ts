@@ -4,6 +4,7 @@ interface BridgeHost {
 
 type DriverEvent =
   | { type: 'USER_ASR'; text?: string; isFinal?: boolean }
+  | { type: 'USER_ASR_ERROR'; code?: number; message?: string }
   | { type: 'TICK'; now?: number }
   | { type: 'EV_VARIANTS_FETCH_DONE'; entry?: unknown | null }
   | { type: 'USER_UI_START' }
@@ -130,6 +131,13 @@ function parseEventJson(raw: string): DriverEvent {
           isFinal: event['isFinal'] === true
         }
       }
+      if (type === 'USER_ASR_ERROR') {
+        return {
+          type: 'USER_ASR_ERROR',
+          code: typeof event['code'] === 'number' ? event['code'] : -1,
+          message: typeof event['message'] === 'string' ? event['message'] : 'asr error'
+        }
+      }
       if (type === 'TICK') {
         return { type: 'TICK', now: typeof event['now'] === 'number' ? event['now'] : Date.now() }
       }
@@ -174,6 +182,13 @@ function reduceDriver(state: DriverState, event: DriverEvent): DriverOutput {
       type: 'EXIT'
     }
     return speakAndStop(next, 'Session ended.')
+  }
+
+  if (event.type === 'USER_ASR_ERROR') {
+    if (state.type === 'IDLE' || state.type === 'EXIT') {
+      return { state, actions: [] }
+    }
+    return speakAndListen(state, `ASR error: ${event.message ?? 'unknown'}. Please repeat.`)
   }
 
   if (event.type !== 'USER_ASR' || event.isFinal !== true) {

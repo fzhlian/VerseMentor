@@ -56,6 +56,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     var settings: SettingsState by mutableStateOf(SettingsState())
         private set
 
+    var debugCheckResult: String by mutableStateOf("-")
+        private set
+
     private var state: SessionState = buildInitialSession(
         config = buildDefaultConfig(prefs),
         poems = SamplePoems.poems
@@ -80,6 +83,19 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     recognizedLines = nextRecognizedLines
                 )
                 dispatch(SessionEvent.UserAsr(text, isFinal, confidence))
+            }
+        }
+        speech.onAsrError = { code, message ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (!uiState.sessionActive || uiState.sessionPaused) {
+                    return@launch
+                }
+                pendingStartListening = false
+                uiState = uiState.copy(
+                    awaitingSpeech = false,
+                    logs = uiState.logs + "ASR error($code): $message"
+                )
+                dispatch(SessionEvent.UserAsrError(code, message))
             }
         }
         speech.onSpeaking = { speaking ->
@@ -504,6 +520,30 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             recite = state.ctx.config.recite
         )
         state = state.copy(ctx = state.ctx.copy(config = config))
+    }
+
+    fun runAsrErrorFlowCheck() {
+        val base = buildInitialSession(
+            config = state.ctx.config,
+            poems = state.ctx.poems
+        )
+        val started = sessionBridge.reduce(base, SessionEvent.UserUiStart)
+        val checked = sessionBridge.reduce(started.state, SessionEvent.UserAsrError(7, "no match"))
+        val hasSpeak = checked.actions.any { it is SessionAction.Speak }
+        val hasStartListening = checked.actions.any { it is SessionAction.StartListening }
+        val actionTypes = checked.actions.joinToString("->") { action ->
+            when (action) {
+                is SessionAction.Speak -> "SPEAK"
+                SessionAction.StartListening -> "START_LISTENING"
+                SessionAction.StopListening -> "STOP_LISTENING"
+                is SessionAction.UpdateScreenHint -> "UPDATE_SCREEN_HINT"
+                is SessionAction.FetchVariants -> "FETCH_VARIANTS"
+            }
+        }.ifBlank { "none" }
+        val mode = if (BuildConfig.USE_SHARED_CORE_REDUCER) "shared-core-bridge" else "local-kotlin"
+        val pass = hasSpeak && hasStartListening && checked.state.type == started.state.type
+        debugCheckResult = "AsrErrorCheck:${if (pass) "PASS" else "FAIL"}(${mode},${checked.state.type},$actionTypes)"
+        uiState = uiState.copy(logs = uiState.logs + "Debug: $debugCheckResult")
     }
 
     private fun text(resId: Int): String {

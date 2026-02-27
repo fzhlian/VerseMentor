@@ -20,6 +20,13 @@ describe('session_contract', () => {
     expect(decoded).toEqual(event)
   })
 
+  test('asr error event encode/decode round-trip', () => {
+    const event = { type: 'USER_ASR_ERROR', code: 7, message: 'no match' } as const
+    const raw = encodeSessionDriverEvent(event)
+    const decoded = decodeSessionDriverEvent(raw)
+    expect(decoded).toEqual(event)
+  })
+
   test('reduceSessionDriverJson equals direct dispatch', () => {
     const initial = createSessionDriverState({
       now: FIXED_NOW,

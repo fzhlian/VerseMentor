@@ -10,6 +10,7 @@ export type SessionShellStage =
 
 export type SessionShellEvent =
   | { type: 'USER_ASR'; text: string; isFinal: boolean; confidence?: number }
+  | { type: 'USER_ASR_ERROR'; code: number; message: string }
   | { type: 'TICK'; now: number }
   | { type: 'EV_VARIANTS_FETCH_DONE'; entry: unknown | null }
   | { type: 'USER_UI_START' }
@@ -196,6 +197,8 @@ export class SessionShellController {
           return []
         }
         return this.handleFinalAsr(event.text)
+      case 'USER_ASR_ERROR':
+        return this.handleAsrError(event.code, event.message)
       case 'TICK':
       case 'EV_VARIANTS_FETCH_DONE':
       default:
@@ -306,6 +309,14 @@ export class SessionShellController {
       default:
         return []
     }
+  }
+
+  private handleAsrError(code: number, message: string): SessionShellAction[] {
+    this.lastAsr = `error:${code}:${message}`
+    if (this.stage === 'IDLE' || this.stage === 'EXIT') {
+      return []
+    }
+    return this.speakAndListen(`ASR error: ${message}. Please repeat.`)
   }
 
   private tryDispatchByRuntime(event: SessionShellEvent): SessionShellAction[] | null {

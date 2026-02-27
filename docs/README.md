@@ -87,6 +87,8 @@ Run:
 
 Known environment issue:
 - If Java fails with `Failed setting boot class path`, verify the local JDK installation and Java runtime environment first (this blocks Gradle before project code compilation starts).
+- Android speech error callback is now routed into reducer event flow (`USER_ASR_ERROR` when shared-core bridge is enabled) for retry prompts.
+- Android Settings page includes `Check ASR Error` debug action that runs a non-destructive reducer probe and appends result to session logs.
 
 ## HarmonyOS
 
@@ -106,8 +108,9 @@ Current shell status:
 - Optional delegate hooks for native/shared-core runtime: `__vmSharedCoreDelegateCreateSessionDriverStateJson()` and `__vmSharedCoreDelegateReduceSessionDriverJson(stateJson, eventJson)`.
 - Hook mode probe: `__vmGetSessionDriverHookMode()` (`mock` or `delegate`).
 - Bridge host also exports ArkTS helper APIs: `registerSharedCoreDelegateHooks(...)`, `clearSharedCoreDelegateHooks()`, `getSharedCoreHookMode()`.
-- Demo delegate helper file: `shared_core_delegate_demo.ts`; Session page has `Enable Delegate` / `Disable Delegate` plus fault-injection controls (`Bad JSON` / `Bad Actions` / `Bad State`) and one-click checks (`Check Runtime On` / `Check Bad JSON` / `Check Bad Actions` / `Check Bad State` / `Check Runtime Off` / `Check All Faults`), expected to validate runtime path (`RuntimeOn`) and fallback reasons `runtime-invalid-json` / `runtime-actions-invalid` / `runtime-state-invalid` / `runtime-disabled`.
-- Speech mock now supports timed ASR scripts and script-state callbacks; Session page includes multi-scenario auto scripts (`Auto Happy` / `Auto Hint` / `Auto Stop` / `Auto Delegate`) with real-time running/pending status.
+- Demo delegate helper file: `shared_core_delegate_demo.ts`; Session page has `Enable Delegate` / `Disable Delegate` plus fault-injection controls (`Bad JSON` / `Bad Actions` / `Bad State`) and one-click checks (`Check Runtime On` / `Check ASR Error` / `Check Bad JSON` / `Check Bad Actions` / `Check Bad State` / `Check Runtime Off` / `Check All Faults`), expected to validate runtime path (`RuntimeOn`, `AsrErrorRuntime`) and fallback reasons `runtime-invalid-json` / `runtime-actions-invalid` / `runtime-state-invalid` / `runtime-disabled`.
+- Speech mock now supports timed ASR/error scripts, script-state callbacks, mock ASR error callbacks, and speaking-state callbacks with auto-complete behavior; Session page includes multi-scenario auto scripts (`Auto Happy` / `Auto Hint` / `Auto Stop` / `Auto Delegate` / `Auto Error` / `Auto ErrDelegate`) with real-time running/pending status.
+- ASR errors are now routed to shell session controller via `USER_ASR_ERROR`; runtime and local reducer paths both provide deterministic recovery prompts.
 - Hook installer is wired in `MainApp`; current hook body is a mock driver placeholder that can be replaced with real shared-core runtime calls.
 - Settings page reads/writes mock preferences through local in-memory storage.
 
@@ -129,7 +132,8 @@ Current shell status:
 - Optional delegate hooks for native/shared-core runtime: `__vmSharedCoreDelegateCreateSessionDriverStateJson()` and `__vmSharedCoreDelegateReduceSessionDriverJson(stateJson, eventJson)`.
 - Hook mode probe: `__vmGetSessionDriverHookMode()` (`mock` or `delegate`).
 - Bridge host also exports ArkTS helper APIs: `registerSharedCoreDelegateHooks(...)`, `clearSharedCoreDelegateHooks()`, `getSharedCoreHookMode()`.
-- Demo delegate helper file: `shared_core_delegate_demo.ts`; Session page has `Enable Delegate` / `Disable Delegate` plus fault-injection controls (`Bad JSON` / `Bad Actions` / `Bad State`) and one-click checks (`Check Runtime On` / `Check Bad JSON` / `Check Bad Actions` / `Check Bad State` / `Check Runtime Off` / `Check All Faults`), expected to validate runtime path (`RuntimeOn`) and fallback reasons `runtime-invalid-json` / `runtime-actions-invalid` / `runtime-state-invalid` / `runtime-disabled`.
-- Speech mock now supports timed ASR scripts and script-state callbacks; Session page includes multi-scenario auto scripts (`Auto Happy` / `Auto Hint` / `Auto Stop` / `Auto Delegate`) with real-time running/pending status.
+- Demo delegate helper file: `shared_core_delegate_demo.ts`; Session page has `Enable Delegate` / `Disable Delegate` plus fault-injection controls (`Bad JSON` / `Bad Actions` / `Bad State`) and one-click checks (`Check Runtime On` / `Check ASR Error` / `Check Bad JSON` / `Check Bad Actions` / `Check Bad State` / `Check Runtime Off` / `Check All Faults`), expected to validate runtime path (`RuntimeOn`, `AsrErrorRuntime`) and fallback reasons `runtime-invalid-json` / `runtime-actions-invalid` / `runtime-state-invalid` / `runtime-disabled`.
+- Speech mock now supports timed ASR/error scripts, script-state callbacks, mock ASR error callbacks, and speaking-state callbacks with auto-complete behavior; Session page includes multi-scenario auto scripts (`Auto Happy` / `Auto Hint` / `Auto Stop` / `Auto Delegate` / `Auto Error` / `Auto ErrDelegate`) with real-time running/pending status.
+- ASR errors are now routed to shell session controller via `USER_ASR_ERROR`; runtime and local reducer paths both provide deterministic recovery prompts.
 - Hook installer is wired in `MainApp`; current hook body is a mock driver placeholder that can be replaced with real shared-core runtime calls.
 - Settings page reads/writes mock preferences through local in-memory storage.

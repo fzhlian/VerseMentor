@@ -81,6 +81,11 @@ class SharedCoreCodec(
                 isFinal = event.isFinal,
                 confidence = event.confidence
             )
+            is SessionEvent.UserAsrError -> SharedCoreEventEnvelope(
+                type = "USER_ASR_ERROR",
+                code = event.code,
+                message = event.message
+            )
             is SessionEvent.Tick -> SharedCoreEventEnvelope(type = "TICK", now = event.now)
             SessionEvent.UserUiStart -> SharedCoreEventEnvelope(type = "USER_UI_START")
             SessionEvent.UserUiStop -> SharedCoreEventEnvelope(type = "USER_UI_STOP")
@@ -123,6 +128,8 @@ data class SharedCoreEventEnvelope(
     val text: String? = null,
     val isFinal: Boolean? = null,
     val confidence: Float? = null,
+    val code: Int? = null,
+    val message: String? = null,
     val now: Long? = null,
     val entry: PoemVariantsCacheEntry? = null
 )

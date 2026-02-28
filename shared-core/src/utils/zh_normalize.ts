@@ -40,6 +40,7 @@ const TRAD_TO_SIMP: Record<string, string> = {
   確: '确',
   認: '认',
   麼: '么',
+  講: '讲',
   那: '那',
   開: '开',
   結: '结',

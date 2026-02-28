@@ -567,6 +567,27 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun waitPoemName_whenTraditionalRepeatIntentWithJiangYiCi_shouldReplayPrompt() {
+        val state = stateOf(SessionStateType.WAIT_POEM_NAME)
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u518d\u8b1b\u4e00\u6b21",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 301186L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertEquals(
+            "\u4f60\u597d\uff0c\u6b22\u8fce\u80cc\u8bf5\u8bd7\u8bcd\u3002\u8bf7\u8bf4\u51fa\u8bd7\u8bcd\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun waitPoemName_whenTraditionalRepeatIntentWithFu_shouldReplayPrompt() {
         val state = stateOf(SessionStateType.WAIT_POEM_NAME)
 

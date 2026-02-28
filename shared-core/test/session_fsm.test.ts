@@ -575,6 +575,33 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('buyongbeile command exits active session and stops listening', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession({ ...ctx, lastUserActiveAt: now })
+    const reciting = {
+      ...initial,
+      type: 'RECITING' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 0,
+        lastUserActiveAt: now
+      }
+    }
+
+    const output = sessionReducer(reciting, {
+      type: 'USER_ASR',
+      text: '不用背了',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('EXIT')
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '好的，已结束会话。' },
+      { type: 'STOP_LISTENING' }
+    ])
+  })
+
   test('repeat prompt command replays current prompt in WAIT_POEM_NAME', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)

@@ -27,6 +27,10 @@ describe('intent parser', () => {
     expect(parseIntent('\u932f\u4e86').type).toBe(IntentType.REJECT_POEM)
   })
 
+  test('recognizes buyongbeile as exit intent', () => {
+    expect(parseIntent('\u4e0d\u7528\u80cc\u4e86').type).toBe(IntentType.EXIT_SESSION)
+  })
+
   test('recognizes common traditional command variants', () => {
     expect(parseIntent('\u7d50\u675f\u3002').type).toBe(IntentType.EXIT_SESSION)
     expect(parseIntent('\u63db\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)

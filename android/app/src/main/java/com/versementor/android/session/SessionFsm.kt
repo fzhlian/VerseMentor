@@ -391,7 +391,11 @@ class SessionReducer {
     private fun isExitIntent(text: String): Boolean {
         val raw = normalizeForIntent(text)
         if (raw.isEmpty()) return false
-        return raw.contains("退出") || raw.contains("结束") || raw.contains("停止") || raw.contains("不背了")
+        return raw.contains("退出") ||
+            raw.contains("结束") ||
+            raw.contains("停止") ||
+            raw.contains("不背了") ||
+            raw.contains("不用背了")
     }
 
     private fun isRejectPoemIntent(text: String): Boolean {

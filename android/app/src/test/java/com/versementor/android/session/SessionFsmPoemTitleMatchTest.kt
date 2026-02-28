@@ -284,6 +284,27 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun waitPoemName_whenTraditionalRepeatIntentWithLai_shouldReplayPrompt() {
+        val state = stateOf(SessionStateType.WAIT_POEM_NAME)
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u518d\u4f86\u4e00\u6b21",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30118L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertEquals(
+            "\u4f60\u597d\uff0c\u6b22\u8fce\u80cc\u8bf5\u8bd7\u8bcd\u3002\u8bf7\u8bf4\u51fa\u8bd7\u8bcd\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun waitDynastyAuthor_whenBothDynastyAndAuthorProvided_entersReciteReady() {
         val poem = SamplePoems.poems.first()
         val state = stateOf(SessionStateType.WAIT_DYNASTY_AUTHOR) {
@@ -507,6 +528,30 @@ class SessionFsmPoemTitleMatchTest {
         assertEquals(SessionStateType.HINT_GIVEN, output.state.type)
         assertEquals(
             "\u63d0\u793a\uff1a\u5e8a\u524d\u2026",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
+    fun finished_whenTraditionalNextPoemIntentWithLai_shouldRestart() {
+        val state = stateOf(SessionStateType.FINISHED) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u518d\u4f86\u4e00\u9996",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 40120L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertNull(output.state.ctx.selectedPoem)
+        assertEquals(
+            "\u597d\u7684\uff0c\u8bf7\u8bf4\u51fa\u4e0b\u4e00\u9996\u8bd7\u7684\u9898\u76ee\u3002",
             output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
         )
     }

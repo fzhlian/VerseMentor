@@ -52,6 +52,7 @@ class SessionReducer {
     private companion object {
         const val MIN_FUZZY_TITLE_SCORE = 0.22
         val TRAD_TO_SIMP: Map<Char, Char> = mapOf(
+            '來' to '来',
             '開' to '开',
             '結' to '结',
             '換' to '换',

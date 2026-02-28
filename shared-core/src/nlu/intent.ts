@@ -1,4 +1,6 @@
-﻿export enum IntentType {
+﻿import { normalizeZh, stripPunct } from '../utils/zh_normalize'
+
+export enum IntentType {
   RECITE_POEM = 'RECITE_POEM',
   SET_POEM = 'SET_POEM',
   REJECT_POEM = 'REJECT_POEM',
@@ -24,6 +26,9 @@ const KEYWORDS = {
 
 export function parseIntent(text: string): { type: IntentType; slots: Record<string, string> } {
   const raw = text.trim()
+  const normalized = stripPunct(normalizeZh(raw)).replace(/\s+/g, '')
+  const hasQuestionTone =
+    raw.includes('?') || raw.includes('？') || raw.includes('吗') || raw.includes('嘛') || raw.includes('么')
   const slots: Record<string, string> = {}
 
   if (!raw) return { type: IntentType.UNKNOWN, slots }
@@ -40,7 +45,7 @@ export function parseIntent(text: string): { type: IntentType; slots: Record<str
     return { type: IntentType.RECITE_POEM, slots }
   }
 
-  if (KEYWORDS.confirm.some((k) => raw === k)) {
+  if (!hasQuestionTone && KEYWORDS.confirm.some((k) => normalized === k)) {
     return { type: IntentType.SET_POEM, slots }
   }
 
@@ -51,3 +56,4 @@ export function parseIntent(text: string): { type: IntentType; slots: Record<str
 
   return { type: IntentType.UNKNOWN, slots }
 }
+

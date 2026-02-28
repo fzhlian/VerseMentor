@@ -6,11 +6,15 @@ describe('intent parser', () => {
     expect(parseIntent('\u662f\u7684').type).toBe(IntentType.SET_POEM)
     expect(parseIntent('\u597d').type).toBe(IntentType.SET_POEM)
     expect(parseIntent('\u6ca1\u9519').type).toBe(IntentType.SET_POEM)
+    expect(parseIntent('\u662f\u7684\u3002').type).toBe(IntentType.SET_POEM)
+    expect(parseIntent('\u597d\uff01').type).toBe(IntentType.SET_POEM)
   })
 
   test('does not treat question-style confirmation as SET_POEM', () => {
     expect(parseIntent('\u662f\u5417').type).toBe(IntentType.UNKNOWN)
     expect(parseIntent('\u662f\u8fd9\u9996\u5417').type).toBe(IntentType.UNKNOWN)
+    expect(parseIntent('\u662f\u8fd9\u9996\uff1f').type).toBe(IntentType.UNKNOWN)
+    expect(parseIntent('\u662f\u8fd9\u9996?').type).toBe(IntentType.UNKNOWN)
   })
 
   test('still recognizes reject intent with higher priority', () => {

@@ -30,7 +30,9 @@ describe('intent parser', () => {
   test('recognizes buyongbeile as exit intent', () => {
     expect(parseIntent('\u4e0d\u7528\u80cc\u4e86').type).toBe(IntentType.EXIT_SESSION)
     expect(parseIntent('\u4e0d\u7528\u80cc\u8aa6\u4e86').type).toBe(IntentType.EXIT_SESSION)
+    expect(parseIntent('\u4e0d\u7528\u80cc\u8a69\u4e86').type).toBe(IntentType.EXIT_SESSION)
     expect(parseIntent('\u4e0d\u60f3\u80cc\u4e86').type).toBe(IntentType.EXIT_SESSION)
+    expect(parseIntent('\u4e0d\u60f3\u80cc\u8a69\u4e86').type).toBe(IntentType.EXIT_SESSION)
   })
 
   test('recognizes common traditional command variants', () => {

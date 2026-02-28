@@ -59,4 +59,24 @@ class PoemIndexTitleMatchTest {
         assertEquals(1, result.size)
         assertEquals("\u67ab\u6865\u591c\u6cca", result.first().title)
     }
+
+    @Test
+    fun findByTitleExact_normalizesTraditionalChangCharacter() {
+        val customIndex = PoemIndex(
+            listOf(
+                Poem(
+                    id = "custom-2",
+                    title = "\u957f\u76f8\u601d",
+                    dynasty = "\u5510",
+                    author = "\u674e\u767d",
+                    lines = listOf(PoemLine("\u957f\u76f8\u601d\u5728\u957f\u5b89"))
+                )
+            )
+        )
+
+        val result = customIndex.findByTitleExact("\u9577\u76f8\u601d")
+
+        assertEquals(1, result.size)
+        assertEquals("\u957f\u76f8\u601d", result.first().title)
+    }
 }

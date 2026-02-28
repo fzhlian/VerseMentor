@@ -401,6 +401,7 @@ class SessionReducer {
             raw.contains("不用背诵了") ||
             raw.contains("不用背诗了") ||
             raw.contains("不想背了") ||
+            raw.contains("不想背诵了") ||
             raw.contains("不想背诗了")
     }
 

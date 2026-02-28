@@ -440,7 +440,7 @@ class SessionReducer {
         return raw.contains("下一首") ||
             raw.contains("换一首") ||
             raw.contains("换诗") ||
-            raw.contains("再来") ||
+            raw.contains("再来一首") ||
             raw.contains("开始")
     }
 

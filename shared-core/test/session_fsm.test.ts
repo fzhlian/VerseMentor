@@ -732,4 +732,26 @@ describe('session_fsm', () => {
     expect(output.state.ctx.currentLineIdx).toBe(0)
     expect(output.state.ctx.reciteProgress).toEqual([])
   })
+
+  test('finished bare zailai utterance should exit session', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const finished = {
+      ...initial,
+      type: 'FINISHED' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(finished, {
+      type: 'USER_ASR',
+      text: '再来',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('EXIT')
+    expect(output.actions).toEqual([{ type: 'SPEAK', text: '好的，已结束会话。' }])
+  })
 })

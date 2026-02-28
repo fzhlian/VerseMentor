@@ -1,19 +1,24 @@
 ﻿package com.versementor.android.speech
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import androidx.core.content.ContextCompat
+import com.versementor.android.R
 import com.versementor.android.VoiceOption
 import java.util.Locale
 
 interface ISpeechIO {
     var onAsrResult: ((String, Boolean, Float?) -> Unit)?
     var onAsrError: ((Int, String) -> Unit)?
+    var onAsrDebug: ((String) -> Unit)?
     var onSpeaking: ((Boolean) -> Unit)?
     fun startListening()
     fun stopListening()
@@ -24,23 +29,48 @@ interface ISpeechIO {
 }
 
 class SpeechIO(private val context: Context) : ISpeechIO {
-    private val speechRecognizer: SpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+    companion object {
+        const val ERROR_START_LISTENING_FAILED = -1
+        const val ERROR_SERVICE_UNAVAILABLE = -2
+    }
+
+    private val speechRecognizer: SpeechRecognizer? =
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) }.getOrNull()
+        } else {
+            null
+        }
     private var tts: TextToSpeech? = null
+    private var isListening = false
+    private var suppressNextClientError = false
     override var onAsrResult: ((String, Boolean, Float?) -> Unit)? = null
     override var onAsrError: ((Int, String) -> Unit)? = null
+    override var onAsrDebug: ((String) -> Unit)? = null
     override var onSpeaking: ((Boolean) -> Unit)? = null
 
     init {
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                isListening = false
+            }
             override fun onError(error: Int) {
+                isListening = false
+                if (error == SpeechRecognizer.ERROR_CLIENT && suppressNextClientError) {
+                    onAsrDebug?.invoke("ASR expected client error suppressed")
+                    suppressNextClientError = false
+                    return
+                }
+                suppressNextClientError = false
+                onAsrDebug?.invoke("ASR error($error): ${mapAsrError(error)}")
                 onAsrError?.invoke(error, mapAsrError(error))
             }
             override fun onResults(results: Bundle?) {
+                isListening = false
+                suppressNextClientError = false
                 val bundle = results ?: return
                 val list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = list?.firstOrNull() ?: return
@@ -79,6 +109,28 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     }
 
     override fun startListening() {
+        if (isListening) {
+            onAsrDebug?.invoke("ASR start ignored: already listening")
+            return
+        }
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasMicPermission) {
+            onAsrDebug?.invoke("ASR start blocked: RECORD_AUDIO permission denied")
+            onAsrError?.invoke(
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                context.getString(R.string.asr_error_insufficient_permissions)
+            )
+            return
+        }
+        val recognizer = speechRecognizer
+        if (recognizer == null) {
+            onAsrDebug?.invoke("ASR unavailable on device")
+            onAsrError?.invoke(ERROR_SERVICE_UNAVAILABLE, context.getString(R.string.asr_error_service_unavailable))
+            return
+        }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
@@ -87,14 +139,30 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
         runCatching {
-            speechRecognizer.startListening(intent)
+            recognizer.startListening(intent)
+            isListening = true
+            suppressNextClientError = false
+            onAsrDebug?.invoke("ASR startListening")
         }.onFailure {
-            onAsrError?.invoke(-1, it.message ?: "startListening failed")
+            isListening = false
+            suppressNextClientError = false
+            onAsrDebug?.invoke("ASR startListening failed: ${it.message ?: "unknown"}")
+            onAsrError?.invoke(
+                ERROR_START_LISTENING_FAILED,
+                it.message ?: context.getString(R.string.asr_error_start_listening_failed)
+            )
         }
     }
 
     override fun stopListening() {
-        speechRecognizer.stopListening()
+        if (!isListening) return
+        val recognizer = speechRecognizer ?: return
+        suppressNextClientError = true
+        onAsrDebug?.invoke("ASR stopListening by app")
+        runCatching {
+            recognizer.stopListening()
+        }
+        isListening = false
     }
 
     override fun speak(text: String, voiceId: String?) {
@@ -121,17 +189,21 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     override fun release() {
         onAsrResult = null
         onAsrError = null
+        onAsrDebug = null
         onSpeaking = null
+        isListening = false
+        suppressNextClientError = true
+        val recognizer = speechRecognizer
         try {
-            speechRecognizer.stopListening()
+            recognizer?.stopListening()
         } catch (_: Throwable) {
         }
         try {
-            speechRecognizer.cancel()
+            recognizer?.cancel()
         } catch (_: Throwable) {
         }
         try {
-            speechRecognizer.destroy()
+            recognizer?.destroy()
         } catch (_: Throwable) {
         }
         tts?.stop()
@@ -141,16 +213,16 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
     private fun mapAsrError(error: Int): String {
         return when (error) {
-            SpeechRecognizer.ERROR_AUDIO -> "audio error"
-            SpeechRecognizer.ERROR_CLIENT -> "client error"
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "insufficient permissions"
-            SpeechRecognizer.ERROR_NETWORK -> "network error"
-            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network timeout"
-            SpeechRecognizer.ERROR_NO_MATCH -> "no match"
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "recognizer busy"
-            SpeechRecognizer.ERROR_SERVER -> "server error"
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "speech timeout"
-            else -> "error code $error"
+            SpeechRecognizer.ERROR_AUDIO -> context.getString(R.string.asr_error_audio)
+            SpeechRecognizer.ERROR_CLIENT -> context.getString(R.string.asr_error_client)
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> context.getString(R.string.asr_error_insufficient_permissions)
+            SpeechRecognizer.ERROR_NETWORK -> context.getString(R.string.asr_error_network)
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> context.getString(R.string.asr_error_network_timeout)
+            SpeechRecognizer.ERROR_NO_MATCH -> context.getString(R.string.asr_error_no_match)
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> context.getString(R.string.asr_error_recognizer_busy)
+            SpeechRecognizer.ERROR_SERVER -> context.getString(R.string.asr_error_server)
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> context.getString(R.string.asr_error_speech_timeout)
+            else -> context.getString(R.string.asr_error_code, error)
         }
     }
 }

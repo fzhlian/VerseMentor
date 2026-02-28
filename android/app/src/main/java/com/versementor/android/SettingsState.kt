@@ -20,6 +20,8 @@ data class SettingsState(
     val toneRemind: Boolean = true,
     val variantsEnable: Boolean = true,
     val variantTtlDays: Int = 7,
+    val transientAsrPromptThreshold: Int = 3,
+    val transientAsrRetryDelayMs: Int = 350,
     val dynastyMappings: List<String> = emptyList(),
     val authors: List<String> = emptyList(),
     val ttsVoices: List<VoiceOption> = emptyList()

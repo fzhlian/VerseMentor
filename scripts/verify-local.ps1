@@ -19,6 +19,40 @@ $resolvedAndroidJdk = $null
 
 $steps = @()
 
+function Invoke-StepCommand {
+    param(
+        [Parameter(Mandatory = $true)]$Step
+    )
+
+    $maxRetries = if ($null -ne $Step.MaxRetries) { [int]$Step.MaxRetries } else { 0 }
+    $retryDelaySeconds = if ($null -ne $Step.RetryDelaySeconds) { [int]$Step.RetryDelaySeconds } else { 1 }
+    $retryExitCodes = @()
+    if ($null -ne $Step.RetryExitCodes) {
+        $retryExitCodes = @($Step.RetryExitCodes | ForEach-Object { [int]$_ })
+    }
+
+    for ($attempt = 0; $attempt -le $maxRetries; $attempt++) {
+        if ($Step.Command.Count -le 1) {
+            & $Step.Command[0]
+        } else {
+            & $Step.Command[0] @($Step.Command[1..($Step.Command.Count - 1)])
+        }
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
+            return
+        }
+
+        $canRetry = $attempt -lt $maxRetries -and $retryExitCodes -contains $exitCode
+        if (-not $canRetry) {
+            throw "Step failed: $($Step.Name) (exit $exitCode)"
+        }
+
+        $nextAttempt = $attempt + 2
+        Write-Host "Retrying $($Step.Name) after exit $exitCode (attempt $nextAttempt/$($maxRetries + 1))..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $retryDelaySeconds
+    }
+}
+
 if (-not $SkipAndroid) {
     if ($DryRun) {
         $resolvedAndroidJdk = "<auto-resolve via .\scripts\ensure-jdk17.cmd -AutoDownload>"
@@ -87,6 +121,9 @@ if (-not $SkipSharedCore) {
             Name = "shared-core test"
             Workdir = $sharedCoreDir
             Command = @("npm.cmd", "test")
+            RetryExitCodes = @(134)
+            MaxRetries = 1
+            RetryDelaySeconds = 1
         }
     }
 }
@@ -123,14 +160,7 @@ foreach ($step in $steps) {
     Write-Host "=== $($step.Name) ===" -ForegroundColor Cyan
     Push-Location $step.Workdir
     try {
-        if ($step.Command.Count -le 1) {
-            & $step.Command[0]
-        } else {
-            & $step.Command[0] @($step.Command[1..($step.Command.Count - 1)])
-        }
-        if ($LASTEXITCODE -ne 0) {
-            throw "Step failed: $($step.Name) (exit $LASTEXITCODE)"
-        }
+        Invoke-StepCommand -Step $step
     } finally {
         Pop-Location
     }

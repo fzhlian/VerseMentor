@@ -27,6 +27,8 @@ This runs:
 - `shared-core` bridge build (`npm.cmd run build:bridge`)
 - `shared-core` unit tests (`npm.cmd test`)
 
+`verify-local` now retries `shared-core` tests once when process exits with `134` (observed intermittent Node/V8 teardown crash), so transient runtime exits do not fail the full validation immediately.
+
 Optional flags:
 
 ```powershell
@@ -64,5 +66,8 @@ Harmony shared file utilities:
 - Shared-core and Android title matching now strip common spoken fillers and collapse repeated title tails (for example `静夜思静夜思`).
 - Android local reducer now aligns with shared-core for `CONFIRM_POEM_CANDIDATE`, `WAIT_DYNASTY_AUTHOR`, `RECITE_READY`, `HINT_OFFER`, and title-timeout baseline handling.
 - Android UI now maps `RECITE_READY` to localized status text (`status_recite_ready`) instead of falling back to raw enum names.
+- Android home background drawable (`android/app/src/main/res/drawable/home_background.png`) is now synced from repo image `Background-no.png`.
+- Android ASR flow now includes expected client-error suppression for app-triggered stop, transient-error delayed retry with configurable threshold/delay, and permission/infrastructure error pause handling.
+- Android listening start path now ignores duplicate start triggers (ViewModel + SpeechIO guards) to reduce recognizer-busy churn.
 - HarmonyOS and HarmonyOS NEXT local/runtime mock/delegate title matching now use a shared `title_matcher.ts` utility to avoid path drift.
 - `scripts/verify-local.ps1` now includes Harmony/Harmony NEXT shared-file parity checks (`-SkipHarmonySync` to opt out).

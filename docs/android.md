@@ -30,6 +30,7 @@ If PowerShell execution policy blocks `.ps1`, use wrapper commands: `.\scripts\e
 For preflight in the same environment, use `.\scripts\check-env.cmd`.
 From repo root, you can run one command for end-to-end local verification: `.\scripts\verify-local.cmd`.
 By default it runs Android preflight/compile/unit tests plus `shared-core` build (`npm.cmd run build`), bridge build (`npm.cmd run build:bridge`), and tests (`npm.cmd test`).
+For `shared-core test`, `verify-local` retries once on exit code `134` (intermittent Node/V8 teardown crash) before marking the step as failed.
 If you only want shared-core tests and want to skip build steps, pass `-SkipSharedCoreBuild`.
 If you want to keep `shared-core` main build but skip bridge build, pass `-SkipSharedCoreBridgeBuild`.
 If you only want shared-core builds and want to skip shared-core tests, pass `-SkipSharedCoreTests`.
@@ -42,6 +43,16 @@ Notes:
 - Microphone permission is required for ASR.
 - Internet permission is included for optional online variant fetching.
 - TTS requires a Chinese voice installed on the device.
+- Home background image is loaded from `android/app/src/main/res/drawable/home_background.png` (current file synced from repo root `Background-no.png`).
+- ASR integration now suppresses expected client errors caused by app-initiated `stopListening()` and exposes ASR debug traces in session logs.
+- If `RECORD_AUDIO` permission is missing, ASR start is blocked before recognizer invocation, and session enters paused state with microphone-permission status text (no reducer error TTS loop).
+- If recognizer infrastructure is unavailable (`-2`) or start-listening fails (`-1`), session enters paused state with direct status text and logs (`ASR infrastructure error`), and does not dispatch reducer error prompts.
+- ASR transient errors (`ERROR_NO_MATCH` / `ERROR_SPEECH_TIMEOUT` / `ERROR_RECOGNIZER_BUSY`) use delayed auto-retry. After N consecutive transient errors, reducer error prompt is emitted once, then transient counter resets.
+- Listening start path is idempotent at both `SessionViewModel.beginListening()` and `SpeechIO.startListening()`, so duplicate start triggers are ignored to reduce recognizer-busy churn.
+- Settings page exposes ASR tuning parameters:
+  - `ASR Retry Prompt Threshold`: range `1..10`, default `3`
+  - `ASR Retry Delay (ms)`: range `100..2000`, default `350`
+- Settings debug panel shows current ASR tuning values and includes `Reset ASR Tuning` to restore defaults.
 - `FETCH_VARIANTS` now resolves via local cache (`SharedPreferences`) with TTL and falls back to local poem lines when no online source is configured.
 - Reciting score now uses both standard line text and cached variants for the current line (best score wins).
 - Shared-core reducer bridge wiring exists and is controlled by Gradle property `-PuseSharedCoreReducer=true`.

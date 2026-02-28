@@ -2,6 +2,7 @@ package com.versementor.android
 
 import android.app.Application
 import android.net.Uri
+import android.speech.SpeechRecognizer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -31,6 +32,7 @@ import com.versementor.android.storage.PoemVariantsCacheEntry
 import com.versementor.android.storage.PreferenceStore
 import com.versementor.android.storage.SharedPrefsVariantCacheStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,7 +42,14 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         const val MIN_VARIANT_TTL_DAYS = 1
         const val MAX_VARIANT_TTL_DAYS = 365
+        const val DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD = 3
+        const val DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS = 350
+        const val MIN_TRANSIENT_ASR_PROMPT_THRESHOLD = 1
+        const val MAX_TRANSIENT_ASR_PROMPT_THRESHOLD = 10
+        const val MIN_TRANSIENT_ASR_RETRY_DELAY_MS = 100
+        const val MAX_TRANSIENT_ASR_RETRY_DELAY_MS = 2000
         private const val MAX_VARIANTS_PER_LINE = 4
+        private const val MAX_UI_LOG_LINES = 200
     }
 
     private val prefs = PreferenceStore(app)
@@ -56,6 +65,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private var isSpeaking = false
     private var pendingStartListening = false
     private var isManuallyPaused = false
+    private var consecutiveTransientAsrErrors = 0
+    private var transientRetryJob: Job? = null
 
     var uiState: SessionUiState by mutableStateOf(SessionUiState())
         private set
@@ -92,6 +103,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (!uiState.sessionActive || uiState.sessionPaused) {
                     return@launch
                 }
+                transientRetryJob?.cancel()
+                transientRetryJob = null
+                consecutiveTransientAsrErrors = 0
                 val heard = text.trim()
                 val nextRecognizedLines = if (isFinal && heard.isNotEmpty() && uiState.recognizedLines.lastOrNull() != heard) {
                     uiState.recognizedLines + heard
@@ -112,12 +126,75 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (!uiState.sessionActive || uiState.sessionPaused) {
                     return@launch
                 }
+                if (
+                    code == SpeechIO.ERROR_SERVICE_UNAVAILABLE ||
+                    code == SpeechIO.ERROR_START_LISTENING_FAILED
+                ) {
+                    transientRetryJob?.cancel()
+                    transientRetryJob = null
+                    consecutiveTransientAsrErrors = 0
+                    pendingStartListening = false
+                    isManuallyPaused = true
+                    speech.stopListening()
+                    uiState = uiState.copy(
+                        sessionPaused = true,
+                        awaitingSpeech = false,
+                        statusText = message,
+                        logs = appendLog("ASR infrastructure error($code): $message")
+                    )
+                    return@launch
+                }
+                if (code == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    transientRetryJob?.cancel()
+                    transientRetryJob = null
+                    consecutiveTransientAsrErrors = 0
+                    pendingStartListening = false
+                    isManuallyPaused = true
+                    speech.stopListening()
+                    uiState = uiState.copy(
+                        sessionPaused = true,
+                        awaitingSpeech = false,
+                        statusText = text(R.string.permission_mic),
+                        logs = appendLog("ASR permission error: $message")
+                    )
+                    return@launch
+                }
+                if (isTransientAsrError(code)) {
+                    consecutiveTransientAsrErrors += 1
+                    pendingStartListening = false
+                    uiState = uiState.copy(
+                        awaitingSpeech = false,
+                        logs = appendLog("ASR transient($code)x$consecutiveTransientAsrErrors: $message")
+                    )
+                    if (consecutiveTransientAsrErrors >= settings.transientAsrPromptThreshold) {
+                        transientRetryJob?.cancel()
+                        transientRetryJob = null
+                        consecutiveTransientAsrErrors = 0
+                        dispatch(SessionEvent.UserAsrError(code, message))
+                        return@launch
+                    }
+                    scheduleTransientAsrRetry()
+                    return@launch
+                }
+                transientRetryJob?.cancel()
+                transientRetryJob = null
+                consecutiveTransientAsrErrors = 0
                 pendingStartListening = false
                 uiState = uiState.copy(
                     awaitingSpeech = false,
-                    logs = uiState.logs + "ASR error($code): $message"
+                    logs = appendLog("ASR error($code): $message")
                 )
                 dispatch(SessionEvent.UserAsrError(code, message))
+            }
+        }
+        speech.onAsrDebug = { message ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (!uiState.sessionActive) {
+                    return@launch
+                }
+                uiState = uiState.copy(
+                    logs = appendLog("ASR debug: $message")
+                )
             }
         }
         speech.onSpeaking = { speaking ->
@@ -188,6 +265,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         isSpeaking = false
         pendingStartListening = false
         isManuallyPaused = false
+        consecutiveTransientAsrErrors = 0
+        transientRetryJob?.cancel()
+        transientRetryJob = null
         uiState = SessionUiState(
             statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false),
             sessionActive = true,
@@ -219,7 +299,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     uiState = uiState.copy(
                         lastSpoken = action.text,
                         awaitingSpeech = false,
-                        logs = uiState.logs + "TTS: ${action.text}"
+                        logs = appendLog("TTS: ${action.text}")
                     )
                     speech.stopListening()
                     speech.speak(action.text, settings.ttsVoiceId)
@@ -249,7 +329,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
                 is SessionAction.UpdateScreenHint -> {
-                    uiState = uiState.copy(logs = uiState.logs + "Hint: ${action.key}")
+                    uiState = uiState.copy(logs = appendLog("Hint: ${action.key}"))
                 }
 
                 is SessionAction.FetchVariants -> {
@@ -262,6 +342,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private fun pauseSessionListening() {
         isManuallyPaused = true
         pendingStartListening = false
+        transientRetryJob?.cancel()
+        transientRetryJob = null
         speech.stopListening()
         uiState = uiState.copy(
             sessionPaused = true,
@@ -289,6 +371,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         pendingStartListening = false
         isManuallyPaused = false
         isSpeaking = false
+        consecutiveTransientAsrErrors = 0
+        transientRetryJob?.cancel()
+        transientRetryJob = null
         speech.stopListening()
         if (stopSpeak) {
             speech.stopSpeak()
@@ -302,6 +387,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun beginListening() {
+        if (uiState.awaitingSpeech) {
+            return
+        }
         uiState = uiState.copy(
             statusText = text(R.string.waiting_input),
             awaitingSpeech = true,
@@ -320,7 +408,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private fun fetchVariants(poem: Poem) {
         if (!state.ctx.config.variants.enableOnline) {
             viewModelScope.launch(Dispatchers.Main) {
-                uiState = uiState.copy(logs = uiState.logs + "Variants disabled, skip ${poem.title}")
+                uiState = uiState.copy(logs = appendLog("Variants disabled, skip ${poem.title}"))
                 dispatch(SessionEvent.VariantsFetched(null))
             }
             return
@@ -345,11 +433,11 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
 
             withContext(Dispatchers.Main.immediate) {
                 if (resolved == null) {
-                    uiState = uiState.copy(logs = uiState.logs + "Variants fetch failed for ${poem.title}")
+                    uiState = uiState.copy(logs = appendLog("Variants fetch failed for ${poem.title}"))
                     dispatch(SessionEvent.VariantsFetched(null))
                 } else {
                     val (resolvedEntry, source) = resolved
-                    uiState = uiState.copy(logs = uiState.logs + "Variants ready (${source}) for ${poem.title}")
+                    uiState = uiState.copy(logs = appendLog("Variants ready (${source}) for ${poem.title}"))
                     dispatch(SessionEvent.VariantsFetched(resolvedEntry))
                 }
             }
@@ -433,7 +521,21 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun loadSettings() {
-        settings = prefs.loadSettings()
+        val loaded = prefs.loadSettings()
+        val normalized = loaded.copy(
+            transientAsrPromptThreshold = loaded.transientAsrPromptThreshold.coerceIn(
+                MIN_TRANSIENT_ASR_PROMPT_THRESHOLD,
+                MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
+            ),
+            transientAsrRetryDelayMs = loaded.transientAsrRetryDelayMs.coerceIn(
+                MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+                MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+            )
+        )
+        settings = normalized
+        if (normalized != loaded) {
+            prefs.saveSettings(normalized)
+        }
         syncStateConfig()
     }
 
@@ -500,6 +602,39 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         settings = settings.copy(variantTtlDays = normalized)
         prefs.saveSettings(settings)
         syncStateConfig()
+    }
+
+    fun setTransientAsrPromptThreshold(count: Int) {
+        val normalized = count.coerceIn(MIN_TRANSIENT_ASR_PROMPT_THRESHOLD, MAX_TRANSIENT_ASR_PROMPT_THRESHOLD)
+        if (normalized == settings.transientAsrPromptThreshold) return
+        settings = settings.copy(transientAsrPromptThreshold = normalized)
+        prefs.saveSettings(settings)
+        uiState = uiState.copy(logs = appendLog("Debug: ASR prompt threshold -> $normalized"))
+    }
+
+    fun setTransientAsrRetryDelayMs(delayMs: Int) {
+        val normalized = delayMs.coerceIn(MIN_TRANSIENT_ASR_RETRY_DELAY_MS, MAX_TRANSIENT_ASR_RETRY_DELAY_MS)
+        if (normalized == settings.transientAsrRetryDelayMs) return
+        settings = settings.copy(transientAsrRetryDelayMs = normalized)
+        prefs.saveSettings(settings)
+        uiState = uiState.copy(logs = appendLog("Debug: ASR retry delay -> ${normalized}ms"))
+    }
+
+    fun resetTransientAsrTuning() {
+        if (
+            settings.transientAsrPromptThreshold == DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD &&
+            settings.transientAsrRetryDelayMs == DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS
+        ) return
+        settings = settings.copy(
+            transientAsrPromptThreshold = DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD,
+            transientAsrRetryDelayMs = DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS
+        )
+        prefs.saveSettings(settings)
+        uiState = uiState.copy(
+            logs = appendLog(
+                "Debug: ASR tuning reset -> threshold=$DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD, delay=${DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS}ms"
+            )
+        )
     }
 
     fun clearVariantCache() {
@@ -571,13 +706,13 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val runtimePathOk = !BuildConfig.USE_SHARED_CORE_REDUCER || trace?.path == "runtime"
         val pass = hasSpeak && hasStartListening && checked.state.type == started.state.type && runtimePathOk
         debugCheckResult = "AsrErrorCheck:${if (pass) "PASS" else "FAIL"}(${mode},${checked.state.type},$actionTypes)"
-        uiState = uiState.copy(logs = uiState.logs + "Debug: $debugCheckResult")
+        uiState = uiState.copy(logs = appendLog("Debug: $debugCheckResult"))
     }
 
     fun runRuntimePathCheck() {
         if (!BuildConfig.USE_SHARED_CORE_REDUCER) {
             runtimeCheckResult = "RuntimePathCheck:SKIP(local-kotlin)"
-            uiState = uiState.copy(logs = uiState.logs + "Debug: $runtimeCheckResult")
+            uiState = uiState.copy(logs = appendLog("Debug: $runtimeCheckResult"))
             return
         }
         val base = buildInitialSession(
@@ -594,7 +729,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val pass = runtimePathOk && hookOk && stateOk && hasSpeak && hasStartListening
         val mode = if (trace != null) "${trace.path}/${trace.reason}" else "unknown"
         runtimeCheckResult = "RuntimePathCheck:${if (pass) "PASS" else "FAIL"}(${mode},${started.state.type})"
-        uiState = uiState.copy(logs = uiState.logs + "Debug: $runtimeCheckResult")
+        uiState = uiState.copy(logs = appendLog("Debug: $runtimeCheckResult"))
     }
 
     fun runBridgeCodecCheck() {
@@ -608,7 +743,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val outputJson = localBridgeRuntime.reduce(stateJson, eventJson)
         if (outputJson == null) {
             codecCheckResult = "BridgeCodecCheck:FAIL(runtime-null)"
-            uiState = uiState.copy(logs = uiState.logs + "Debug: $codecCheckResult")
+            uiState = uiState.copy(logs = appendLog("Debug: $codecCheckResult"))
             return
         }
         val decodeResult = sharedCoreCodec.decodeOutputWithReason(outputJson)
@@ -616,7 +751,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         if (output == null) {
             val reason = decodeResult.reason ?: "decode-null"
             codecCheckResult = "BridgeCodecCheck:FAIL(output-$reason)"
-            uiState = uiState.copy(logs = uiState.logs + "Debug: $codecCheckResult")
+            uiState = uiState.copy(logs = appendLog("Debug: $codecCheckResult"))
             return
         }
         val hasSpeak = output.actions.any { it is SessionAction.Speak }
@@ -624,7 +759,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val stateOk = output.state.type == SessionStateType.WAIT_POEM_NAME
         val pass = hasSpeak && hasStartListening && stateOk
         codecCheckResult = "BridgeCodecCheck:${if (pass) "PASS" else "FAIL"}(${output.state.type})"
-        uiState = uiState.copy(logs = uiState.logs + "Debug: $codecCheckResult")
+        uiState = uiState.copy(logs = appendLog("Debug: $codecCheckResult"))
     }
 
     fun runBridgeEventRoundTripCheck() {
@@ -649,7 +784,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val pass = startOk && asrOk
         eventCheckResult =
             "BridgeEventCheck:${if (pass) "PASS" else "FAIL"}(start=${if (startOk) "ok" else "bad"},asr=${if (asrOk) "ok" else "bad"})"
-        uiState = uiState.copy(logs = uiState.logs + "Debug: $eventCheckResult")
+        uiState = uiState.copy(logs = appendLog("Debug: $eventCheckResult"))
     }
 
     fun runAllBridgeChecks() {
@@ -667,7 +802,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val pass = eventOk && codecOk && runtimeOk && asrOk
         allBridgeCheckResult =
             "AllBridgeChecks:${if (pass) "PASS" else "FAIL"}(event=${if (eventOk) "ok" else "bad"},codec=${if (codecOk) "ok" else "bad"},runtime=${if (runtimeOk) "ok" else "bad"},asr=${if (asrOk) "ok" else "bad"})"
-        uiState = uiState.copy(logs = uiState.logs + "Debug: $allBridgeCheckResult")
+        uiState = uiState.copy(logs = appendLog("Debug: $allBridgeCheckResult"))
     }
 
     private fun text(resId: Int): String {
@@ -693,7 +828,35 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun isTransientAsrError(code: Int): Boolean {
+        return code == SpeechRecognizer.ERROR_NO_MATCH ||
+            code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+            code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+    }
+
+    private fun scheduleTransientAsrRetry() {
+        transientRetryJob?.cancel()
+        transientRetryJob = viewModelScope.launch(Dispatchers.Main.immediate) {
+            delay(settings.transientAsrRetryDelayMs.toLong())
+            if (!uiState.sessionActive || uiState.sessionPaused || isManuallyPaused) {
+                return@launch
+            }
+            if (isSpeaking) {
+                pendingStartListening = true
+            } else {
+                beginListening()
+            }
+        }
+    }
+
+    private fun appendLog(line: String): List<String> {
+        val next = uiState.logs + line
+        return if (next.size > MAX_UI_LOG_LINES) next.takeLast(MAX_UI_LOG_LINES) else next
+    }
+
     override fun onCleared() {
+        transientRetryJob?.cancel()
+        transientRetryJob = null
         sharedCoreHookToken?.let { token ->
             SharedCoreRuntimeHooks.clearReduceHook(token)
             sharedCoreHookToken = null

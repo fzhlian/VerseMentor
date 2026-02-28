@@ -194,7 +194,7 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         Text(text = ui.statusText)
         Text(text = ui.lastSpoken)
         Text(text = ui.lastHeard)
-        Button(onClick = onBack) { Text(text = "Back") }
+        Button(onClick = onBack) { Text(text = stringResource(id = R.string.back)) }
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(ui.logs) { line ->
@@ -210,6 +210,10 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
     var ttlError by remember { mutableStateOf(false) }
+    var transientPromptText by remember { mutableStateOf(settings.transientAsrPromptThreshold.toString()) }
+    var transientPromptError by remember { mutableStateOf(false) }
+    var transientDelayText by remember { mutableStateOf(settings.transientAsrRetryDelayMs.toString()) }
+    var transientDelayError by remember { mutableStateOf(false) }
     var aliasText by remember { mutableStateOf("") }
     var canonicalText by remember { mutableStateOf("") }
     var groupAlias by remember { mutableStateOf("") }
@@ -221,11 +225,19 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         ttlText = settings.variantTtlDays.toString()
         ttlError = false
     }
+    LaunchedEffect(settings.transientAsrPromptThreshold) {
+        transientPromptText = settings.transientAsrPromptThreshold.toString()
+        transientPromptError = false
+    }
+    LaunchedEffect(settings.transientAsrRetryDelayMs) {
+        transientDelayText = settings.transientAsrRetryDelayMs.toString()
+        transientDelayError = false
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(text = stringResource(id = R.string.settings), style = MaterialTheme.typography.headlineSmall)
-            Button(onClick = onBack) { Text(text = "Back") }
+            Button(onClick = onBack) { Text(text = stringResource(id = R.string.back)) }
         }
 
         Text(text = stringResource(id = R.string.language))
@@ -240,7 +252,7 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
 
         Text(text = stringResource(id = R.string.tts_voice))
         Button(onClick = { expanded = true }) {
-            Text(text = settings.ttsVoiceName.ifEmpty { "Select" })
+            Text(text = settings.ttsVoiceName.ifEmpty { stringResource(id = R.string.select) })
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             settings.ttsVoices.forEach { voice ->
@@ -304,6 +316,78 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         Button(onClick = { viewModel.clearVariantCache() }) {
             Text(text = stringResource(id = R.string.variants_clear))
         }
+        OutlinedTextField(
+            value = transientPromptText,
+            onValueChange = {
+                transientPromptText = it
+                val value = it.toIntOrNull()
+                val isValid =
+                    value != null &&
+                        value in SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD..SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
+                transientPromptError = it.isNotEmpty() && !isValid
+                if (isValid) {
+                    value?.let(viewModel::setTransientAsrPromptThreshold)
+                }
+            },
+            label = { Text(text = stringResource(id = R.string.asr_transient_prompt_threshold)) },
+            isError = transientPromptError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = {
+                if (transientPromptError) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_transient_prompt_threshold_invalid,
+                            SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD,
+                            SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
+                        )
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_transient_prompt_threshold_hint,
+                            SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD,
+                            SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
+                        )
+                    )
+                }
+            }
+        )
+        OutlinedTextField(
+            value = transientDelayText,
+            onValueChange = {
+                transientDelayText = it
+                val value = it.toIntOrNull()
+                val isValid =
+                    value != null &&
+                        value in SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS..SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+                transientDelayError = it.isNotEmpty() && !isValid
+                if (isValid) {
+                    value?.let(viewModel::setTransientAsrRetryDelayMs)
+                }
+            },
+            label = { Text(text = stringResource(id = R.string.asr_transient_retry_delay_ms)) },
+            isError = transientDelayError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = {
+                if (transientDelayError) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_transient_retry_delay_ms_invalid,
+                            SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+                            SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+                        )
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_transient_retry_delay_ms_hint,
+                            SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+                            SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+                        )
+                    )
+                }
+            }
+        )
 
         Text(text = stringResource(id = R.string.dynasty_mapping))
         LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
@@ -320,7 +404,7 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(modifier = Modifier.weight(1f), value = groupAlias, onValueChange = { groupAlias = it }, label = { Text(text = stringResource(id = R.string.group)) })
-            OutlinedTextField(modifier = Modifier.weight(1f), value = groupIds, onValueChange = { groupIds = it }, label = { Text(text = "Ids/Names" ) })
+            OutlinedTextField(modifier = Modifier.weight(1f), value = groupIds, onValueChange = { groupIds = it }, label = { Text(text = stringResource(id = R.string.ids_names)) })
             Button(onClick = { viewModel.addDynastyGroup(groupAlias, groupIds); groupAlias = ""; groupIds = "" }) {
                 Text(text = stringResource(id = R.string.add))
             }
@@ -333,7 +417,7 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
             }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(modifier = Modifier.weight(1f), value = authorName, onValueChange = { authorName = it }, label = { Text(text = "Author" ) })
+            OutlinedTextField(modifier = Modifier.weight(1f), value = authorName, onValueChange = { authorName = it }, label = { Text(text = stringResource(id = R.string.author)) })
             OutlinedTextField(modifier = Modifier.weight(1f), value = authorAlias, onValueChange = { authorAlias = it }, label = { Text(text = stringResource(id = R.string.alias)) })
             Button(onClick = { viewModel.addAuthor(authorName, authorAlias); authorName = ""; authorAlias = "" }) {
                 Text(text = stringResource(id = R.string.add))
@@ -341,26 +425,41 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         }
 
         HorizontalDivider()
-        Text(text = "Debug")
-        Text(text = "All Bridge Checks: ${viewModel.allBridgeCheckResult}")
+        Text(text = stringResource(id = R.string.debug_title))
+        Text(
+            text = stringResource(
+                id = R.string.debug_asr_prompt_threshold,
+                settings.transientAsrPromptThreshold
+            )
+        )
+        Text(
+            text = stringResource(
+                id = R.string.debug_asr_retry_delay_ms,
+                settings.transientAsrRetryDelayMs
+            )
+        )
+        Button(onClick = { viewModel.resetTransientAsrTuning() }) {
+            Text(text = stringResource(id = R.string.debug_reset_asr_tuning))
+        }
+        Text(text = stringResource(id = R.string.debug_all_bridge_checks, viewModel.allBridgeCheckResult))
         Button(onClick = { viewModel.runAllBridgeChecks() }) {
-            Text(text = "Check All Bridge")
+            Text(text = stringResource(id = R.string.debug_check_all_bridge))
         }
-        Text(text = "Bridge Event Check: ${viewModel.eventCheckResult}")
+        Text(text = stringResource(id = R.string.debug_bridge_event_check, viewModel.eventCheckResult))
         Button(onClick = { viewModel.runBridgeEventRoundTripCheck() }) {
-            Text(text = "Check Bridge Event")
+            Text(text = stringResource(id = R.string.debug_check_bridge_event))
         }
-        Text(text = "Bridge Codec Check: ${viewModel.codecCheckResult}")
+        Text(text = stringResource(id = R.string.debug_bridge_codec_check, viewModel.codecCheckResult))
         Button(onClick = { viewModel.runBridgeCodecCheck() }) {
-            Text(text = "Check Bridge Codec")
+            Text(text = stringResource(id = R.string.debug_check_bridge_codec))
         }
-        Text(text = "Runtime Path Check: ${viewModel.runtimeCheckResult}")
+        Text(text = stringResource(id = R.string.debug_runtime_path_check, viewModel.runtimeCheckResult))
         Button(onClick = { viewModel.runRuntimePathCheck() }) {
-            Text(text = "Check Runtime Path")
+            Text(text = stringResource(id = R.string.debug_check_runtime_path))
         }
-        Text(text = "ASR Error Check: ${viewModel.debugCheckResult}")
+        Text(text = stringResource(id = R.string.debug_asr_error_check, viewModel.debugCheckResult))
         Button(onClick = { viewModel.runAsrErrorFlowCheck() }) {
-            Text(text = "Check ASR Error")
+            Text(text = stringResource(id = R.string.debug_check_asr_error))
         }
     }
 }

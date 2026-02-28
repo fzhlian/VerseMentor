@@ -1,5 +1,9 @@
 ﻿<resources>
     <string name="app_name">背诵吧</string>
+    <string name="back">返回</string>
+    <string name="select">选择</string>
+    <string name="ids_names">编号/名称</string>
+    <string name="author">作者</string>
     <string name="start">开始</string>
     <string name="settings">设置</string>
     <string name="session">会话</string>
@@ -36,6 +40,12 @@
     <string name="variants_ttl_hint">范围：%1$d-%2$d 天</string>
     <string name="variants_ttl_invalid">请输入 %1$d 到 %2$d 之间的整数</string>
     <string name="variants_clear">清除异文缓存</string>
+    <string name="asr_transient_prompt_threshold">语音瞬时错误提示阈值</string>
+    <string name="asr_transient_prompt_threshold_hint">连续瞬时错误达到 %1$d-%2$d 次后提示</string>
+    <string name="asr_transient_prompt_threshold_invalid">请输入 %1$d 到 %2$d 之间的整数</string>
+    <string name="asr_transient_retry_delay_ms">语音重试延时（毫秒）</string>
+    <string name="asr_transient_retry_delay_ms_hint">范围：%1$d-%2$d 毫秒</string>
+    <string name="asr_transient_retry_delay_ms_invalid">请输入 %1$d 到 %2$d 之间的整数</string>
     <string name="dynasty_mapping">朝代映射</string>
     <string name="author_library">作者库</string>
     <string name="add">添加</string>
@@ -44,4 +54,30 @@
     <string name="group">分组</string>
     <string name="save">保存</string>
     <string name="home_poem_placeholder">点击开始进入背诵</string>
+    <string name="debug_title">调试</string>
+    <string name="debug_asr_prompt_threshold">语音提示阈值：%1$d</string>
+    <string name="debug_asr_retry_delay_ms">语音重试延时：%1$d 毫秒</string>
+    <string name="debug_reset_asr_tuning">重置语音调参</string>
+    <string name="debug_all_bridge_checks">桥接总检查：%1$s</string>
+    <string name="debug_check_all_bridge">检查全部桥接</string>
+    <string name="debug_bridge_event_check">桥接事件检查：%1$s</string>
+    <string name="debug_check_bridge_event">检查桥接事件</string>
+    <string name="debug_bridge_codec_check">桥接编解码检查：%1$s</string>
+    <string name="debug_check_bridge_codec">检查桥接编解码</string>
+    <string name="debug_runtime_path_check">运行时路径检查：%1$s</string>
+    <string name="debug_check_runtime_path">检查运行时路径</string>
+    <string name="debug_asr_error_check">语音错误检查：%1$s</string>
+    <string name="debug_check_asr_error">检查语音错误</string>
+    <string name="asr_error_audio">音频输入异常</string>
+    <string name="asr_error_client">客户端异常</string>
+    <string name="asr_error_insufficient_permissions">需要麦克风权限。</string>
+    <string name="asr_error_network">网络异常</string>
+    <string name="asr_error_network_timeout">网络超时</string>
+    <string name="asr_error_no_match">未识别到有效语音</string>
+    <string name="asr_error_recognizer_busy">识别器忙碌</string>
+    <string name="asr_error_server">语音服务异常</string>
+    <string name="asr_error_speech_timeout">说话超时</string>
+    <string name="asr_error_code">错误代码 %1$d</string>
+    <string name="asr_error_service_unavailable">当前设备不支持语音识别服务。</string>
+    <string name="asr_error_start_listening_failed">启动识别失败</string>
 </resources>

@@ -1,5 +1,9 @@
 ﻿<resources>
     <string name="app_name">VerseMentor</string>
+    <string name="back">Back</string>
+    <string name="select">Select</string>
+    <string name="ids_names">Ids/Names</string>
+    <string name="author">Author</string>
     <string name="start">Start</string>
     <string name="settings">Settings</string>
     <string name="session">Session</string>
@@ -36,6 +40,12 @@
     <string name="variants_ttl_hint">Range: %1$d-%2$d days</string>
     <string name="variants_ttl_invalid">Enter a whole number between %1$d and %2$d</string>
     <string name="variants_clear">Clear Variant Cache</string>
+    <string name="asr_transient_prompt_threshold">ASR Retry Prompt Threshold</string>
+    <string name="asr_transient_prompt_threshold_hint">Prompt after %1$d-%2$d transient ASR errors</string>
+    <string name="asr_transient_prompt_threshold_invalid">Enter a whole number between %1$d and %2$d</string>
+    <string name="asr_transient_retry_delay_ms">ASR Retry Delay (ms)</string>
+    <string name="asr_transient_retry_delay_ms_hint">Retry delay range: %1$d-%2$d ms</string>
+    <string name="asr_transient_retry_delay_ms_invalid">Enter a whole number between %1$d and %2$d</string>
     <string name="dynasty_mapping">Dynasty Mapping</string>
     <string name="author_library">Author Library</string>
     <string name="add">Add</string>
@@ -44,4 +54,30 @@
     <string name="group">Group</string>
     <string name="save">Save</string>
     <string name="home_poem_placeholder">Tap Start to begin a recitation session</string>
+    <string name="debug_title">Debug</string>
+    <string name="debug_asr_prompt_threshold">ASR Prompt Threshold: %1$d</string>
+    <string name="debug_asr_retry_delay_ms">ASR Retry Delay: %1$d ms</string>
+    <string name="debug_reset_asr_tuning">Reset ASR Tuning</string>
+    <string name="debug_all_bridge_checks">All Bridge Checks: %1$s</string>
+    <string name="debug_check_all_bridge">Check All Bridge</string>
+    <string name="debug_bridge_event_check">Bridge Event Check: %1$s</string>
+    <string name="debug_check_bridge_event">Check Bridge Event</string>
+    <string name="debug_bridge_codec_check">Bridge Codec Check: %1$s</string>
+    <string name="debug_check_bridge_codec">Check Bridge Codec</string>
+    <string name="debug_runtime_path_check">Runtime Path Check: %1$s</string>
+    <string name="debug_check_runtime_path">Check Runtime Path</string>
+    <string name="debug_asr_error_check">ASR Error Check: %1$s</string>
+    <string name="debug_check_asr_error">Check ASR Error</string>
+    <string name="asr_error_audio">Audio input error</string>
+    <string name="asr_error_client">Client error</string>
+    <string name="asr_error_insufficient_permissions">Microphone permission is required.</string>
+    <string name="asr_error_network">Network error</string>
+    <string name="asr_error_network_timeout">Network timeout</string>
+    <string name="asr_error_no_match">No speech matched</string>
+    <string name="asr_error_recognizer_busy">Recognizer busy</string>
+    <string name="asr_error_server">Speech service error</string>
+    <string name="asr_error_speech_timeout">Speech timeout</string>
+    <string name="asr_error_code">Error code %1$d</string>
+    <string name="asr_error_service_unavailable">Speech recognition service is unavailable on this device.</string>
+    <string name="asr_error_start_listening_failed">startListening failed</string>
 </resources>

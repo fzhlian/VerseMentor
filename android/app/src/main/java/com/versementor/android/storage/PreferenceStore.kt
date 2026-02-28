@@ -17,6 +17,8 @@ class PreferenceStore(context: Context) {
         val toneRemind = prefs.getBoolean("toneRemind", true)
         val variantsEnable = prefs.getBoolean("variantsEnable", true)
         val variantTtlDays = prefs.getInt("variantTtlDays", 7)
+        val transientAsrPromptThreshold = prefs.getInt("transientAsrPromptThreshold", 3)
+        val transientAsrRetryDelayMs = prefs.getInt("transientAsrRetryDelayMs", 350)
 
         val accentJson = prefs.getString("accentTolerance", null)
         val accent = accentJson?.let {
@@ -38,6 +40,8 @@ class PreferenceStore(context: Context) {
             toneRemind = toneRemind,
             variantsEnable = variantsEnable,
             variantTtlDays = variantTtlDays,
+            transientAsrPromptThreshold = transientAsrPromptThreshold,
+            transientAsrRetryDelayMs = transientAsrRetryDelayMs,
             dynastyMappings = mappings,
             authors = authors
         )
@@ -51,6 +55,8 @@ class PreferenceStore(context: Context) {
             .putBoolean("toneRemind", settings.toneRemind)
             .putBoolean("variantsEnable", settings.variantsEnable)
             .putInt("variantTtlDays", settings.variantTtlDays)
+            .putInt("transientAsrPromptThreshold", settings.transientAsrPromptThreshold)
+            .putInt("transientAsrRetryDelayMs", settings.transientAsrRetryDelayMs)
             .putString("accentTolerance", gson.toJson(settings.accentTolerance))
             .putString("dynastyMappings", gson.toJson(settings.dynastyMappings))
             .putString("authors", gson.toJson(settings.authors))

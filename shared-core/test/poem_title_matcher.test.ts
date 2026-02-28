@@ -44,4 +44,11 @@ describe('poem_title_matcher', () => {
     expect(result.candidates[0].poem.title).toBe('静夜思')
     expect(result.candidates[0].score).toBe(1)
   })
+
+  test('traditional qiao character in title should normalize for exact match', () => {
+    const result = matchPoemTitle(index, '楓橋夜泊')
+    expect(result.candidates.length).toBeGreaterThan(0)
+    expect(result.candidates[0].poem.title).toBe('枫桥夜泊')
+    expect(result.candidates[0].score).toBe(1)
+  })
 })

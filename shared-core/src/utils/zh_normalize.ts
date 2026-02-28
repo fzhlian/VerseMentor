@@ -65,6 +65,7 @@ const TRAD_TO_SIMP: Record<string, string> = {
   黃: '黄',
   廬: '庐',
   楓: '枫',
+  橋: '桥',
   絕: '绝',
   遊: '游',
   詠: '咏',

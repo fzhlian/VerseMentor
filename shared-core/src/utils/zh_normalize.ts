@@ -34,6 +34,8 @@ const TRAD_TO_SIMP: Record<string, string> = {
   雲: '云',
   後: '后',
   這: '这',
+  沒: '没',
+  錯: '错',
   那: '那',
   開: '开',
   結: '结',

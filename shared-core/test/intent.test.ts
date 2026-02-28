@@ -6,6 +6,7 @@ describe('intent parser', () => {
     expect(parseIntent('\u662f\u7684').type).toBe(IntentType.SET_POEM)
     expect(parseIntent('\u597d').type).toBe(IntentType.SET_POEM)
     expect(parseIntent('\u6ca1\u9519').type).toBe(IntentType.SET_POEM)
+    expect(parseIntent('\u6c92\u932f').type).toBe(IntentType.SET_POEM)
     expect(parseIntent('\u662f\u7684\u3002').type).toBe(IntentType.SET_POEM)
     expect(parseIntent('\u597d\uff01').type).toBe(IntentType.SET_POEM)
   })
@@ -21,6 +22,7 @@ describe('intent parser', () => {
   test('still recognizes reject intent with higher priority', () => {
     expect(parseIntent('\u4e0d\u662f').type).toBe(IntentType.REJECT_POEM)
     expect(parseIntent('\u4e0d\u5bf9').type).toBe(IntentType.REJECT_POEM)
+    expect(parseIntent('\u932f\u4e86').type).toBe(IntentType.REJECT_POEM)
   })
 
   test('recognizes common traditional command variants', () => {

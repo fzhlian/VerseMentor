@@ -22,6 +22,8 @@ class PoemIndex(private val poems: List<Poem>) {
         '\u5ee3' to '\u5e7f',
         '\u96f2' to '\u4e91',
         '\u9019' to '\u8fd9',
+        '\u6c92' to '\u6ca1',
+        '\u932f' to '\u9519',
         '\u8208' to '\u5174',
         '\u570b' to '\u56fd',
         '\u8a69' to '\u8bd7',

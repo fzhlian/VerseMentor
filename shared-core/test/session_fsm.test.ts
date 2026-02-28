@@ -199,6 +199,32 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('confirm candidate with traditional reject intent should clear selected poem', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '錯了',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '好的，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
   test('confirm candidate with affirmative utterance should proceed to dynasty-author stage', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)
@@ -214,6 +240,34 @@ describe('session_fsm', () => {
     const output = sessionReducer(confirmState, {
       type: 'USER_ASR',
       text: '是的',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+    expect(output.state.ctx.selectedPoem?.title).toBe('静夜思')
+    expect(output.actions[0]).toEqual({
+      type: 'SPEAK',
+      text: '已选择《静夜思》。请说出朝代和作者。'
+    })
+    expect(output.actions.some((action) => action.type === 'FETCH_VARIANTS')).toBe(true)
+    expect(output.actions).toContainEqual({ type: 'START_LISTENING' })
+  })
+
+  test('confirm candidate with traditional affirmative utterance should proceed to dynasty-author stage', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '沒錯',
       isFinal: true
     })
 

@@ -63,6 +63,8 @@ class SessionReducer {
             '幫' to '帮',
             '嗎' to '吗',
             '這' to '这',
+            '沒' to '没',
+            '錯' to '错',
             '說' to '说',
             '續' to '续'
         )

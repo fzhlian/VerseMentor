@@ -452,6 +452,8 @@ class SessionReducer {
             raw.contains("再来首") ||
             raw.contains("重来一首") ||
             raw.contains("重来首") ||
+            raw.contains("重新来一首") ||
+            raw.contains("重新来首") ||
             raw.contains("开始")
     }
 

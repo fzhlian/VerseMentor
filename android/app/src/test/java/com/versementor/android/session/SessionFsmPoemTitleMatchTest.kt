@@ -480,6 +480,30 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun finished_whenTraditionalChongXinLaiYiShouIntent_shouldRestart() {
+        val state = stateOf(SessionStateType.FINISHED) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u91cd\u65b0\u4f86\u4e00\u9996",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 301196L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertNull(output.state.ctx.selectedPoem)
+        assertEquals(
+            "\u597d\u7684\uff0c\u8bf7\u8bf4\u51fa\u4e0b\u4e00\u9996\u8bd7\u7684\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun finished_whenBareZaiLaiUtterance_shouldExitSession() {
         val state = stateOf(SessionStateType.FINISHED) {
             selectedPoem = SamplePoems.poems.first()

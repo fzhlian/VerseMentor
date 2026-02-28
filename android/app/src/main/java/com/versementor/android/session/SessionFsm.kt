@@ -467,7 +467,10 @@ class SessionReducer {
     private fun isRepeatIntent(text: String): Boolean {
         val raw = normalizeForIntent(text)
         if (raw.isEmpty()) return false
-        return raw.contains("再说一遍") || raw.contains("重复") || raw.contains("再来一次")
+        return raw.contains("再说一遍") ||
+            raw.contains("重复") ||
+            raw.contains("再来一次") ||
+            raw.contains("再来一遍")
     }
 
     private fun buildRepeatReply(type: SessionStateType, ctx: SessionContext): String? {

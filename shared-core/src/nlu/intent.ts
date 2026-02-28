@@ -21,7 +21,7 @@ const KEYWORDS = {
   hint: ['提示', '给提示', '不会了', '提示一下', '帮我'],
   exit: ['退出', '结束', '停止', '不背了'],
   next: ['下一首', '换一首', '换诗'],
-  repeat: ['再说一遍', '重复', '再来一次']
+  repeat: ['再说一遍', '重复', '再来一次', '再来一遍']
 }
 
 function normalizeForKeywordMatch(raw: string): string {

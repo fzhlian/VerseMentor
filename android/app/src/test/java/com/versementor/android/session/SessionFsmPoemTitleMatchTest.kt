@@ -556,6 +556,30 @@ class SessionFsmPoemTitleMatchTest {
         )
     }
 
+    @Test
+    fun finished_whenRepeatPhraseZaiLaiYiBian_shouldReplayFinishedPrompt() {
+        val state = stateOf(SessionStateType.FINISHED) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u518d\u4f86\u4e00\u904d",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 40121L
+            )
+        )
+
+        assertEquals(SessionStateType.FINISHED, output.state.type)
+        assertEquals(
+            "\u8fd8\u8981\u518d\u6765\u4e00\u9996\u5417\uff1f",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+        assertTrue(output.actions.any { it is SessionAction.StartListening })
+    }
+
     private fun stateOf(type: SessionStateType, mutate: SessionContext.() -> Unit = {}): SessionState {
         val base = buildInitialSession(
             config = AppConfig(),

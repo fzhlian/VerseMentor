@@ -11,6 +11,7 @@
     <string name="status_wait_poem_name">请说出诗词题目</string>
     <string name="status_confirm_poem">请确认识别到的诗词</string>
     <string name="status_wait_author">请说出朝代和作者</string>
+    <string name="status_recite_ready">准备背诵第一句</string>
     <string name="status_hint_offer">需要提示时可说“提示”</string>
     <string name="status_hint_given">已给出提示，请继续背诵</string>
     <string name="status_finished">本首完成，是否继续</string>

@@ -11,6 +11,7 @@
     <string name="status_wait_poem_name">Say the poem title</string>
     <string name="status_confirm_poem">Confirm the recognized poem</string>
     <string name="status_wait_author">Say dynasty and author</string>
+    <string name="status_recite_ready">Ready to recite line one</string>
     <string name="status_hint_offer">Say \"hint\" if needed</string>
     <string name="status_hint_given">Hint provided, continue reciting</string>
     <string name="status_finished">Finished this poem, continue?</string>

@@ -683,6 +683,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             SessionStateType.WAIT_POEM_NAME -> text(R.string.status_wait_poem_name)
             SessionStateType.CONFIRM_POEM_CANDIDATE -> text(R.string.status_confirm_poem)
             SessionStateType.WAIT_DYNASTY_AUTHOR -> text(R.string.status_wait_author)
+            SessionStateType.RECITE_READY -> text(R.string.status_recite_ready)
             SessionStateType.RECITING -> text(R.string.status_reciting)
             SessionStateType.HINT_OFFER -> text(R.string.status_hint_offer)
             SessionStateType.HINT_GIVEN -> text(R.string.status_hint_given)

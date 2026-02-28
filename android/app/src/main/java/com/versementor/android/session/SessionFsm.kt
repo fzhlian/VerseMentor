@@ -49,6 +49,10 @@ sealed class SessionAction {
 }
 
 class SessionReducer {
+    private companion object {
+        const val MIN_FUZZY_TITLE_SCORE = 0.22
+    }
+
     fun reduce(state: SessionState, event: SessionEvent): SessionOutput {
         val ctx = state.ctx
         val actions = mutableListOf<SessionAction>()
@@ -123,7 +127,11 @@ class SessionReducer {
                 when (event) {
                     is SessionEvent.Tick -> {
                         val start = ctx.noPoemIntentSince
-                        if (start != null && event.now - start >= ctx.config.timeouts.noPoemIntentExitSec * 1000L) {
+                        if (start == null) {
+                            ctx.noPoemIntentSince = event.now
+                            return next(SessionStateType.WAIT_POEM_NAME)
+                        }
+                        if (event.now - start >= ctx.config.timeouts.noPoemIntentExitSec * 1000L) {
                             actions += SessionAction.Speak("暂时没有识别到诗词题目，先结束会话。")
                             return next(SessionStateType.EXIT)
                         }
@@ -132,8 +140,7 @@ class SessionReducer {
                     is SessionEvent.UserAsr -> {
                         if (!event.isFinal) return next(SessionStateType.WAIT_POEM_NAME)
                         val spoken = event.text
-                        val exact = ctx.poemIndex.findByTitleExact(spoken)
-                        val candidates = if (exact.isNotEmpty()) exact.map { ScoredPoem(it, 1.0) } else ctx.poemIndex.findByTitleFuzzy(spoken)
+                        val candidates = resolvePoemCandidates(ctx.poemIndex, spoken)
                         if (candidates.isEmpty()) {
                             actions += SessionAction.Speak("没有找到这首诗，请再说一次题目。")
                             actions += SessionAction.StartListening
@@ -158,7 +165,7 @@ class SessionReducer {
 
             SessionStateType.CONFIRM_POEM_CANDIDATE -> {
                 if (event is SessionEvent.UserAsr && event.isFinal) {
-                    if (event.text.contains("不是") || event.text.contains("不对")) {
+                    if (isRejectPoemIntent(event.text)) {
                         ctx.selectedPoem = null
                         ctx.variantsCacheEntry = null
                         actions += SessionAction.Speak("好的，请再说一次题目。")
@@ -166,12 +173,16 @@ class SessionReducer {
                         return next(SessionStateType.WAIT_POEM_NAME)
                     }
                     val poem = ctx.selectedPoem
-                    if (poem != null) {
+                    if (poem != null && isConfirmPoemIntent(event.text)) {
                         actions += SessionAction.Speak("已选择《${poem.title}》。请说出朝代和作者。")
                         actions += SessionAction.FetchVariants(poem)
                         actions += SessionAction.StartListening
                         return next(SessionStateType.WAIT_DYNASTY_AUTHOR)
                     }
+                    ctx.selectedPoem = null
+                    ctx.variantsCacheEntry = null
+                    actions += SessionAction.Speak("没有确认到题目，请再说一次题目。")
+                    actions += SessionAction.StartListening
                     return next(SessionStateType.WAIT_POEM_NAME)
                 }
                 return next(SessionStateType.CONFIRM_POEM_CANDIDATE)
@@ -183,12 +194,39 @@ class SessionReducer {
                     return next(SessionStateType.WAIT_DYNASTY_AUTHOR)
                 }
                 if (event is SessionEvent.UserAsr && event.isFinal) {
-                    actions += SessionAction.Speak("好的，开始背诵。")
+                    val poem = ctx.selectedPoem
+                    if (poem != null && isDynastyAuthorMatch(event.text, poem)) {
+                        actions += SessionAction.Speak("好的，开始背诵。")
+                        actions += SessionAction.StartListening
+                        ctx.currentLineIdx = 0
+                        ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
+                        return next(SessionStateType.RECITE_READY)
+                    }
+                    actions += SessionAction.Speak("请再说一次朝代和作者。")
                     actions += SessionAction.StartListening
-                    ctx.currentLineIdx = 0
-                    return next(SessionStateType.RECITING)
+                    return next(SessionStateType.WAIT_DYNASTY_AUTHOR)
                 }
                 return next(SessionStateType.WAIT_DYNASTY_AUTHOR)
+            }
+
+            SessionStateType.RECITE_READY -> {
+                if (ctx.selectedPoem == null) return next(SessionStateType.EXIT)
+                if (event is SessionEvent.UserAsr && event.isFinal) {
+                    if (ctx.currentLineIdx != 0) {
+                        ctx.currentLineIdx = 0
+                    }
+                    ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
+                    return reduce(SessionState(SessionStateType.RECITING, ctx), event)
+                }
+                if (ctx.currentLineIdx != 0) {
+                    ctx.currentLineIdx = 0
+                }
+                if (ctx.lastUserActiveAt == null) {
+                    ctx.lastUserActiveAt = System.currentTimeMillis()
+                }
+                actions += SessionAction.Speak("请背诵第一句。")
+                actions += SessionAction.StartListening
+                return next(SessionStateType.RECITING)
             }
 
             SessionStateType.RECITING -> {
@@ -231,6 +269,12 @@ class SessionReducer {
                             actions += SessionAction.StartListening
                             return next(SessionStateType.RECITING)
                         }
+                        if (isAskHintIntent(event.text)) {
+                            val hint = poem.lines.getOrNull(ctx.currentLineIdx)?.text?.take(2) ?: "提示"
+                            actions += SessionAction.Speak("提示：${hint}…")
+                            actions += SessionAction.StartListening
+                            return next(SessionStateType.HINT_GIVEN)
+                        }
                         actions += SessionAction.Speak("没关系，再试一次。")
                         actions += SessionAction.StartListening
                         return next(SessionStateType.RECITING)
@@ -255,14 +299,16 @@ class SessionReducer {
                         if (!event.isFinal) return next(SessionStateType.HINT_OFFER)
                         ctx.hintOfferSince = null
                         val poem = ctx.selectedPoem
-                        if (poem != null) {
+                        if (poem != null && isAskHintIntent(event.text)) {
                             val line = poem.lines.getOrNull(ctx.currentLineIdx)
                             val hint = line?.text?.take(2) ?: "提示"
                             actions += SessionAction.Speak("提示：${hint}…")
                             actions += SessionAction.StartListening
                             return next(SessionStateType.HINT_GIVEN)
                         }
-                        return next(SessionStateType.HINT_OFFER)
+                        actions += SessionAction.Speak("好的，继续。")
+                        actions += SessionAction.StartListening
+                        return next(SessionStateType.RECITING)
                     }
                     else -> return next(SessionStateType.HINT_OFFER)
                 }
@@ -277,7 +323,7 @@ class SessionReducer {
 
             SessionStateType.FINISHED -> {
                 if (event is SessionEvent.UserAsr && event.isFinal) {
-                    if (event.text.contains("是") || event.text.contains("再来")) {
+                    if (isNextPoemIntent(event.text)) {
                         actions += SessionAction.Speak("好的，请说出下一首诗的题目。")
                         actions += SessionAction.StartListening
                         ctx.selectedPoem = null
@@ -297,6 +343,20 @@ class SessionReducer {
         }
     }
 
+    private fun resolvePoemCandidates(poemIndex: PoemIndex, spoken: String): List<ScoredPoem> {
+        val exact = poemIndex.findByTitleExact(spoken)
+        if (exact.isNotEmpty()) {
+            return exact.map { ScoredPoem(it, 1.0) }
+        }
+
+        val contained = poemIndex.findByTitleContained(spoken)
+        if (contained.isNotEmpty()) {
+            return contained
+        }
+
+        return poemIndex.findByTitleFuzzy(spoken).filter { it.score >= MIN_FUZZY_TITLE_SCORE }
+    }
+
     private fun scoreLineWithVariants(userText: String, target: String, variants: List<String>): Double {
         var best = scoreLine(userText, target)
         for (variant in variants) {
@@ -309,6 +369,78 @@ class SessionReducer {
         val raw = text.trim()
         if (raw.isEmpty()) return false
         return raw.contains("退出") || raw.contains("结束") || raw.contains("停止") || raw.contains("不背了")
+    }
+
+    private fun isRejectPoemIntent(text: String): Boolean {
+        val raw = normalizeForIntent(text)
+        if (raw.isEmpty()) return false
+        return raw.contains("不是") ||
+            raw.contains("不对") ||
+            raw.contains("不要") ||
+            raw.contains("错了") ||
+            raw.contains("换一个")
+    }
+
+    private fun isDynastyAuthorMatch(text: String, poem: Poem): Boolean {
+        val raw = normalizeForIntent(text)
+        if (raw.isEmpty()) return false
+        val dynasty = normalizeForIntent(poem.dynasty)
+        val author = normalizeForIntent(poem.author)
+        if (dynasty.isEmpty() || author.isEmpty()) return false
+        return raw.contains(dynasty) && raw.contains(author)
+    }
+
+    private fun isConfirmPoemIntent(text: String): Boolean {
+        val rawOriginal = text.trim()
+        val raw = normalizeForIntent(text)
+        if (raw.isEmpty()) return false
+        if (isRejectPoemIntent(raw)) return false
+        if (rawOriginal.contains("?") || rawOriginal.contains("？")) return false
+        if (
+            raw == "是" ||
+            raw == "是的" ||
+            raw == "对" ||
+            raw == "对的" ||
+            raw == "好的" ||
+            raw == "好" ||
+            raw == "确认" ||
+            raw == "就是它" ||
+            raw == "没错" ||
+            raw == "就是这首" ||
+            raw == "是这首" ||
+            raw == "就这首"
+        ) {
+            return true
+        }
+        if (raw.contains("吗") || raw.contains("嘛") || raw.contains("么")) return false
+        return raw.contains("就是这首") ||
+            raw.contains("确认这首") ||
+            raw.contains("是这首") ||
+            raw.contains("就这首")
+    }
+
+    private fun isNextPoemIntent(text: String): Boolean {
+        val raw = text.trim()
+        if (raw.isEmpty()) return false
+        return raw.contains("下一首") ||
+            raw.contains("换一首") ||
+            raw.contains("换诗") ||
+            raw.contains("再来") ||
+            raw.contains("开始")
+    }
+
+    private fun isAskHintIntent(text: String): Boolean {
+        val raw = text.trim()
+        if (raw.isEmpty()) return false
+        return raw.contains("提示") ||
+            raw.contains("给提示") ||
+            raw.contains("不会了") ||
+            raw.contains("提示一下") ||
+            raw.contains("帮我")
+    }
+
+    private fun normalizeForIntent(text: String): String {
+        return text.trim().lowercase().replace(Regex("[\\p{P}\\p{S}\\s]+"), "")
     }
 
     private fun isRepeatIntent(text: String): Boolean {

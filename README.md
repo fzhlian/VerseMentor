@@ -52,6 +52,24 @@ Harmony shared file utilities:
 .\scripts\sync-harmony-shared.cmd -DryRun
 ```
 
+Android one-click release (build + GitHub Release upload):
+
+```powershell
+.\scripts\release-android.cmd
+```
+
+Optional flags:
+
+```powershell
+.\scripts\release-android.cmd -Tag v0.4.9
+.\scripts\release-android.cmd -SkipBuild
+.\scripts\release-android.cmd -SkipPush
+.\scripts\release-android.cmd -Draft
+.\scripts\release-android.cmd -Prerelease
+.\scripts\release-android.cmd -AllowDirty
+.\scripts\release-android.cmd -DryRun
+```
+
 ## Platform entry points
 
 - Shared core: [docs/README.md](docs/README.md#shared-core-typescript--arkts-compatible)

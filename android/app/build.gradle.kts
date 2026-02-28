@@ -76,6 +76,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    applicationVariants.all {
+        val currentVersionName = versionName ?: "0.0.0"
+        outputs.all {
+            val apkOutput = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            apkOutput.outputFileName = "VerseMentor-v${currentVersionName}-${buildType.name}.apk"
+        }
+    }
 }
 
 dependencies {

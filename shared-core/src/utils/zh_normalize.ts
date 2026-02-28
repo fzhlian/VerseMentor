@@ -19,13 +19,18 @@ function toHalfWidth(input: string): string {
 
 const TRAD_TO_SIMP: Record<string, string> = {
   來: '来',
+  靜: '静',
   覺: '觉',
+  曉: '晓',
   鳥: '鸟',
+  鸛: '鹳',
+  鶴: '鹤',
   風: '风',
   雨: '雨',
   處: '处',
   間: '间',
   樓: '楼',
+  廣: '广',
   雲: '云',
   後: '后',
   這: '这',
@@ -35,6 +40,8 @@ const TRAD_TO_SIMP: Record<string, string> = {
   讀: '读',
   詩: '诗',
   詞: '词',
+  贈: '赠',
+  倫: '伦',
   車: '车',
   麗: '丽',
   見: '见',
@@ -43,7 +50,17 @@ const TRAD_TO_SIMP: Record<string, string> = {
   寫: '写',
   愛: '爱',
   說: '说',
-  遠: '远'
+  遠: '远',
+  黃: '黄',
+  廬: '庐',
+  楓: '枫',
+  絕: '绝',
+  遊: '游',
+  詠: '咏',
+  臺: '台',
+  題: '题',
+  宮: '宫',
+  發: '发'
 }
 
 function simpTradUnify(input: string): string {
@@ -71,11 +88,31 @@ function removeFillers(input: string): string {
   return out
 }
 
+function collapseRepeatedTailSegment(input: string): string {
+  let out = input
+  const maxChunkLen = Math.min(12, Math.floor(out.length / 2))
+  for (let len = maxChunkLen; len >= 3; len--) {
+    let changed = true
+    while (changed && out.length >= len * 2) {
+      changed = false
+      const tail = out.slice(out.length - len)
+      const prev = out.slice(out.length - len * 2, out.length - len)
+      if (tail === prev) {
+        out = out.slice(0, out.length - len)
+        changed = true
+      }
+    }
+  }
+  return out
+}
+
 function collapseRepeats(input: string): string {
   // Collapse immediate character repeats: "啊啊啊" -> "啊"
   let out = input.replace(/(.)\1{2,}/g, '$1')
   // Collapse immediate bi-gram repeats: "你好你好" -> "你好"
   out = out.replace(/(.{2})\1{1,}/g, '$1')
+  // Collapse repeated trailing segments: "我想背静夜思静夜思" -> "我想背静夜思"
+  out = collapseRepeatedTailSegment(out)
   return out
 }
 

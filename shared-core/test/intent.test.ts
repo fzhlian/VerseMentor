@@ -1,0 +1,20 @@
+import { describe, expect, test } from 'vitest'
+import { IntentType, parseIntent } from '../src/nlu/intent'
+
+describe('intent parser', () => {
+  test('recognizes explicit poem confirmation utterances', () => {
+    expect(parseIntent('\u662f\u7684').type).toBe(IntentType.SET_POEM)
+    expect(parseIntent('\u597d').type).toBe(IntentType.SET_POEM)
+    expect(parseIntent('\u6ca1\u9519').type).toBe(IntentType.SET_POEM)
+  })
+
+  test('does not treat question-style confirmation as SET_POEM', () => {
+    expect(parseIntent('\u662f\u5417').type).toBe(IntentType.UNKNOWN)
+    expect(parseIntent('\u662f\u8fd9\u9996\u5417').type).toBe(IntentType.UNKNOWN)
+  })
+
+  test('still recognizes reject intent with higher priority', () => {
+    expect(parseIntent('\u4e0d\u662f').type).toBe(IntentType.REJECT_POEM)
+    expect(parseIntent('\u4e0d\u5bf9').type).toBe(IntentType.REJECT_POEM)
+  })
+})

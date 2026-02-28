@@ -102,6 +102,195 @@ describe('session_fsm', () => {
     expect(afterAsr.state.type).toBe('WAIT_DYNASTY_AUTHOR')
   })
 
+  test('natural recite utterance containing title should select poem directly', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const started = sessionReducer(initial, { type: 'USER_UI_START' })
+    const afterAsr = sessionReducer(started.state, {
+      type: 'USER_ASR',
+      text: '我想背静夜思',
+      isFinal: true
+    })
+
+    expect(afterAsr.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+    expect(afterAsr.state.ctx.selectedPoem?.title).toBe('静夜思')
+  })
+
+  test('generic recite command without title should not force fuzzy confirm', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const started = sessionReducer(initial, { type: 'USER_UI_START' })
+    const afterAsr = sessionReducer(started.state, {
+      type: 'USER_ASR',
+      text: '我想背一首诗',
+      isFinal: true
+    })
+
+    expect(afterAsr.state.type).toBe('WAIT_POEM_NAME')
+    expect(afterAsr.actions).toEqual([
+      { type: 'SPEAK', text: '没有找到这首诗，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('confirm candidate with non-affirmative utterance should clear selected poem', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '不知道',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('confirm candidate with reject intent should clear selected poem', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '不是',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '好的，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('confirm candidate with affirmative utterance should proceed to dynasty-author stage', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '是的',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+    expect(output.state.ctx.selectedPoem?.title).toBe('静夜思')
+    expect(output.actions[0]).toEqual({
+      type: 'SPEAK',
+      text: '已选择《静夜思》。请说出朝代和作者。'
+    })
+    expect(output.actions.some((action) => action.type === 'FETCH_VARIANTS')).toBe(true)
+    expect(output.actions).toContainEqual({ type: 'START_LISTENING' })
+  })
+
+  test('confirm candidate with question containing shi should not auto-confirm', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '是吗',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('confirm candidate with question phrase shi zhe shou ma should not auto-confirm', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '是这首吗',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('confirm candidate with question punctuation should not auto-confirm', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '是这首？',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
   test('variants hot update does not block', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)
@@ -116,6 +305,56 @@ describe('session_fsm', () => {
       entry: null
     })
     expect(updated.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+  })
+
+  test('wait dynasty-author accepts only selected poem dynasty and author', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const waiting = {
+      ...initial,
+      type: 'WAIT_DYNASTY_AUTHOR' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(waiting, {
+      type: 'USER_ASR',
+      text: '唐 李白',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('RECITE_READY')
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '好的，开始背诵。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('wait dynasty-author rejects mismatched author even when both entities are recognized', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const waiting = {
+      ...initial,
+      type: 'WAIT_DYNASTY_AUTHOR' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(waiting, {
+      type: 'USER_ASR',
+      text: '唐 孟浩然',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '请再说一次朝代和作者。' },
+      { type: 'START_LISTENING' }
+    ])
   })
 
   test('asr error keeps state and asks user to retry', () => {
@@ -311,5 +550,68 @@ describe('session_fsm', () => {
       { type: 'SPEAK', text: '很好，下一句。' },
       { type: 'START_LISTENING' }
     ])
+  })
+
+  test('finished next poem command should reset poem-scoped session context', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const finished = {
+      ...initial,
+      type: 'FINISHED' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        dynastyResolved: {
+          matchedBy: 'canonical' as const,
+          canonical: {
+            id: 'dynasty:tang',
+            name: '唐',
+            source: 'auto' as const,
+            createdAt: now,
+            updatedAt: now,
+            freq: 1
+          },
+        },
+        authorResolved: {
+          matchedBy: 'primary' as const,
+          author: {
+            id: 'author:李白',
+            name: '李白',
+            aliases: [],
+            dynastyId: 'dynasty:tang',
+            source: 'auto' as const,
+            createdAt: now,
+            updatedAt: now,
+            freq: 1
+          },
+        },
+        variantsCacheEntry: {
+          poemId: samplePoems[0].id,
+          variants: {
+            poemId: samplePoems[0].id,
+            lines: [],
+            sourceTags: []
+          },
+          cachedAt: now,
+          expiresAt: now + 60000
+        },
+        currentLineIdx: 2,
+        reciteProgress: [{ idx: 0, passed: true, score: 1 }]
+      }
+    }
+
+    const output = sessionReducer(finished, {
+      type: 'USER_ASR',
+      text: '下一首',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.state.ctx.dynastyResolved).toBeUndefined()
+    expect(output.state.ctx.authorResolved).toBeUndefined()
+    expect(output.state.ctx.variantsCacheEntry).toBeNull()
+    expect(output.state.ctx.currentLineIdx).toBe(0)
+    expect(output.state.ctx.reciteProgress).toEqual([])
   })
 })

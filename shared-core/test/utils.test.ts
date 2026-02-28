@@ -8,6 +8,7 @@ describe('utils', () => {
     expect(normalizeZh('  \u9019\u662f\u3000\u6e2c\u8a66  ')).toContain('\u8fd9')
     expect(stripPunct('\u4f60\u597d\uff0c\u4e16\u754c\uff01')).toBe('\u4f60\u597d\u4e16\u754c')
     expect(dedupeSpeechFiller('\u55ef\u55ef\u90a3\u4e2a\u8fd9\u4e2a \u9759\u591c\u601d \u9759\u591c\u601d')).toContain('\u9759\u591c\u601d')
+    expect(dedupeSpeechFiller('\u55ef\u55ef\u90a3\u4e2a\u6211\u60f3\u80cc\u9759\u591c\u601d\u9759\u591c\u601d')).toBe('\u6211\u60f3\u80cc\u9759\u591c\u601d')
   })
 
   test('similarity helpers', () => {

@@ -8,6 +8,7 @@ import { judgeLine } from '../recite/matcher'
 import { AuthorKB, AuthorResolveResult, resolveAuthorSpoken } from '../kb/author_kb'
 import { DynastyKB, DynastyResolveResult, resolveDynastySpoken } from '../kb/dynasty_kb'
 import { PRAISE_TEMPLATES, PraisePicker } from '../persona/praise'
+import { normalizeZh } from '../utils/zh_normalize'
 
 export type SessionStateType =
   | 'IDLE'
@@ -140,6 +141,75 @@ function buildRepeatReply(stateType: SessionStateType, ctx: SessionContext): str
   }
 }
 
+const REJECT_POEM_KEYWORDS = ['不是', '不对', '不要', '错了', '换一个']
+const QUESTION_MARKERS = ['吗', '嘛', '么']
+const CONFIRM_POEM_EXACT = new Set([
+  '是',
+  '是的',
+  '对',
+  '对的',
+  '好的',
+  '好',
+  '确认',
+  '就是它',
+  '没错',
+  '就是这首',
+  '是这首',
+  '就这首'
+])
+
+function normalizeIntentText(raw: string): string {
+  return normalizeZh(raw).replace(/[\p{P}\p{S}\s]+/gu, '')
+}
+
+function isRejectPoemUtterance(raw: string): boolean {
+  const normalized = normalizeIntentText(raw)
+  if (!normalized) return false
+  return REJECT_POEM_KEYWORDS.some((keyword) => normalized.includes(keyword))
+}
+
+function isConfirmPoemUtterance(raw: string): boolean {
+  const trimmedRaw = raw.trim()
+  const normalized = normalizeIntentText(raw)
+  if (!normalized) return false
+  if (isRejectPoemUtterance(normalized)) return false
+  if (trimmedRaw.includes('?') || trimmedRaw.includes('？')) return false
+  if (CONFIRM_POEM_EXACT.has(normalized)) return true
+  if (QUESTION_MARKERS.some((marker) => normalized.includes(marker))) return false
+  return normalized.includes('就是这首') ||
+    normalized.includes('确认这首') ||
+    normalized.includes('是这首') ||
+    normalized.includes('就这首')
+}
+
+function isSelectedPoemDynastyAuthorMatch(
+  spokenText: string,
+  poem: Poem,
+  dynastyResolved: DynastyResolveResult,
+  authorResolved: AuthorResolveResult
+): boolean {
+  const normalizedSpoken = normalizeZh(spokenText).replace(/[\p{P}\p{S}\s]+/gu, '')
+  const normalizedDynasty = normalizeZh(poem.dynasty).replace(/[\p{P}\p{S}\s]+/gu, '')
+  const normalizedAuthor = normalizeZh(poem.author).replace(/[\p{P}\p{S}\s]+/gu, '')
+  if (
+    normalizedSpoken &&
+    normalizedDynasty &&
+    normalizedAuthor &&
+    normalizedSpoken.includes(normalizedDynasty) &&
+    normalizedSpoken.includes(normalizedAuthor)
+  ) {
+    return true
+  }
+
+  const resolvedDynasty = dynastyResolved.canonical?.name
+  const resolvedAuthor = authorResolved.author?.name
+  if (!resolvedDynasty || !resolvedAuthor) return false
+  return (
+    normalizeZh(resolvedDynasty) === normalizeZh(poem.dynasty) &&
+    normalizeZh(resolvedAuthor) === normalizeZh(poem.author)
+  )
+}
+
 export function sessionReducer(state: SessionState, event: SessionEvent): SessionOutput {
   const ctx = state.ctx
   const actions: SessionAction[] = []
@@ -147,6 +217,14 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
   const withState = (type: SessionStateType, nextCtx: SessionContext = ctx): SessionOutput => ({
     state: { type, ctx: nextCtx },
     actions
+  })
+  const resetPoemSelection = (baseCtx: SessionContext): SessionContext => ({
+    ...baseCtx,
+    selectedPoem: undefined,
+    dynastyResolved: undefined,
+    authorResolved: undefined,
+    variantsCacheEntry: null,
+    currentLineIdx: 0
   })
 
   const reduceRecitingAsr = (recitingCtx: SessionContext, text: string, now?: number): SessionOutput => {
@@ -298,12 +376,13 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     case 'CONFIRM_POEM_CANDIDATE':
       if (event.type === 'USER_ASR' && event.isFinal) {
         const intent = parseIntent(event.text)
-        if (intent.type === IntentType.REJECT_POEM) {
+        if (intent.type === IntentType.REJECT_POEM || isRejectPoemUtterance(event.text)) {
+          const nextCtx = resetPoemSelection(ctx)
           actions.push({ type: 'SPEAK', text: '好的，请再说一次题目。' })
           actions.push({ type: 'START_LISTENING' })
-          return withState('WAIT_POEM_NAME')
+          return withState('WAIT_POEM_NAME', nextCtx)
         }
-        if (intent.type === IntentType.SET_POEM || event.text.includes('是')) {
+        if (intent.type === IntentType.SET_POEM || isConfirmPoemUtterance(event.text)) {
           const poem = ctx.selectedPoem
           if (poem) {
             actions.push({ type: 'SPEAK', text: `已选择《${poem.title}》。请说出朝代和作者。` })
@@ -312,9 +391,10 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
             return withState('WAIT_DYNASTY_AUTHOR')
           }
         }
+        const nextCtx = resetPoemSelection(ctx)
         actions.push({ type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' })
         actions.push({ type: 'START_LISTENING' })
-        return withState('WAIT_POEM_NAME')
+        return withState('WAIT_POEM_NAME', nextCtx)
       }
       return withState('CONFIRM_POEM_CANDIDATE')
 
@@ -324,11 +404,15 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
         return withState('WAIT_DYNASTY_AUTHOR', nextCtx)
       }
       if (event.type === 'USER_ASR' && event.isFinal) {
+        const selectedPoem = ctx.selectedPoem
         const dynastyResolved = resolveDynastySpoken(ctx.dynastyKB, event.text)
         const dynastyIds = dynastyResolved.canonical ? [dynastyResolved.canonical.id] : undefined
         const authorResolved = resolveAuthorSpoken(ctx.authorKB, event.text, dynastyIds)
         const nextCtx = { ...ctx, dynastyResolved, authorResolved }
-        if (dynastyResolved.canonical && authorResolved.author) {
+        if (
+          selectedPoem &&
+          isSelectedPoemDynastyAuthorMatch(event.text, selectedPoem, dynastyResolved, authorResolved)
+        ) {
           actions.push({ type: 'SPEAK', text: '好的，开始背诵。' })
           actions.push({ type: 'START_LISTENING' })
           return withState('RECITE_READY', nextCtx)
@@ -423,9 +507,7 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
           actions.push({ type: 'SPEAK', text: '好的，请说出下一首诗的题目。' })
           actions.push({ type: 'START_LISTENING' })
           const nextCtx = {
-            ...ctx,
-            selectedPoem: undefined,
-            currentLineIdx: 0,
+            ...resetPoemSelection(ctx),
             reciteProgress: [],
             timers: { noPoemIntentSince: Date.now() }
           }

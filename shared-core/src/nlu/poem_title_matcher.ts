@@ -1,6 +1,8 @@
-﻿import { Poem } from '../data/models'
+import { Poem } from '../data/models'
 import { PoemIndex } from '../data/poem_index'
 import { cleanSpeechText } from './text_cleaner'
+
+const MIN_FUZZY_TITLE_SCORE = 0.22
 
 export function matchPoemTitle(
   index: PoemIndex,
@@ -17,7 +19,18 @@ export function matchPoemTitle(
     }
   }
 
-  const fuzzy = index.findByTitleFuzzy(cleaned, 3)
+  const contained = index.findByTitleContained(cleaned, 3)
+  if (contained.length > 0) {
+    return {
+      candidates: contained,
+      extractedTitle: cleaned
+    }
+  }
+
+  const fuzzy = index
+    .findByTitleFuzzy(cleaned, 3)
+    .filter((candidate) => candidate.score >= MIN_FUZZY_TITLE_SCORE)
+
   return {
     candidates: fuzzy,
     extractedTitle: cleaned

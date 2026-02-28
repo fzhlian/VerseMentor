@@ -46,9 +46,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalClipboardManager
 import com.versementor.android.session.SessionUiState
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -207,6 +209,7 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
 @Composable
 fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     val settings = viewModel.settings
+    val clipboard = LocalClipboardManager.current
     var expanded by remember { mutableStateOf(false) }
     var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
     var ttlError by remember { mutableStateOf(false) }
@@ -214,6 +217,8 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     var transientPromptError by remember { mutableStateOf(false) }
     var transientDelayText by remember { mutableStateOf(settings.transientAsrRetryDelayMs.toString()) }
     var transientDelayError by remember { mutableStateOf(false) }
+    var stopStartCooldownText by remember { mutableStateOf(settings.asrStopToStartCooldownMs.toString()) }
+    var stopStartCooldownError by remember { mutableStateOf(false) }
     var aliasText by remember { mutableStateOf("") }
     var canonicalText by remember { mutableStateOf("") }
     var groupAlias by remember { mutableStateOf("") }
@@ -232,6 +237,10 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     LaunchedEffect(settings.transientAsrRetryDelayMs) {
         transientDelayText = settings.transientAsrRetryDelayMs.toString()
         transientDelayError = false
+    }
+    LaunchedEffect(settings.asrStopToStartCooldownMs) {
+        stopStartCooldownText = settings.asrStopToStartCooldownMs.toString()
+        stopStartCooldownError = false
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -388,6 +397,42 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
                 }
             }
         )
+        OutlinedTextField(
+            value = stopStartCooldownText,
+            onValueChange = {
+                stopStartCooldownText = it
+                val value = it.toIntOrNull()
+                val isValid =
+                    value != null &&
+                        value in SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS..SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
+                stopStartCooldownError = it.isNotEmpty() && !isValid
+                if (isValid) {
+                    value?.let(viewModel::setAsrStopToStartCooldownMs)
+                }
+            },
+            label = { Text(text = stringResource(id = R.string.asr_stop_start_cooldown_ms)) },
+            isError = stopStartCooldownError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = {
+                if (stopStartCooldownError) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_stop_start_cooldown_ms_invalid,
+                            SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS,
+                            SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
+                        )
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_stop_start_cooldown_ms_hint,
+                            SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS,
+                            SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
+                        )
+                    )
+                }
+            }
+        )
 
         Text(text = stringResource(id = R.string.dynasty_mapping))
         LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
@@ -438,8 +483,37 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
                 settings.transientAsrRetryDelayMs
             )
         )
+        Text(
+            text = stringResource(
+                id = R.string.debug_asr_stop_start_cooldown_ms,
+                settings.asrStopToStartCooldownMs
+            )
+        )
         Button(onClick = { viewModel.resetTransientAsrTuning() }) {
             Text(text = stringResource(id = R.string.debug_reset_asr_tuning))
+        }
+        val asrLogs = viewModel.getAsrLogs()
+        Text(text = stringResource(id = R.string.asr_logs_count, asrLogs.size))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = asrLogs.isNotEmpty(),
+                onClick = {
+                    clipboard.setText(AnnotatedString(viewModel.getAsrLogText()))
+                }
+            ) {
+                Text(text = stringResource(id = R.string.asr_logs_copy))
+            }
+            Button(
+                enabled = asrLogs.isNotEmpty(),
+                onClick = { viewModel.clearAsrLogs() }
+            ) {
+                Text(text = stringResource(id = R.string.asr_logs_clear))
+            }
+        }
+        LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+            items(asrLogs.takeLast(40)) { line ->
+                Text(text = line)
+            }
         }
         Text(text = stringResource(id = R.string.debug_all_bridge_checks, viewModel.allBridgeCheckResult))
         Button(onClick = { viewModel.runAllBridgeChecks() }) {

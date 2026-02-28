@@ -46,6 +46,12 @@
     <string name="asr_transient_retry_delay_ms">ASR Retry Delay (ms)</string>
     <string name="asr_transient_retry_delay_ms_hint">Retry delay range: %1$d-%2$d ms</string>
     <string name="asr_transient_retry_delay_ms_invalid">Enter a whole number between %1$d and %2$d</string>
+    <string name="asr_stop_start_cooldown_ms">ASR Stop-to-Start Cooldown (ms)</string>
+    <string name="asr_stop_start_cooldown_ms_hint">Cooldown range: %1$d-%2$d ms</string>
+    <string name="asr_stop_start_cooldown_ms_invalid">Enter a whole number between %1$d and %2$d</string>
+    <string name="asr_logs_count">ASR Logs: %1$d</string>
+    <string name="asr_logs_copy">Copy ASR Logs</string>
+    <string name="asr_logs_clear">Clear ASR Logs</string>
     <string name="dynasty_mapping">Dynasty Mapping</string>
     <string name="author_library">Author Library</string>
     <string name="add">Add</string>
@@ -57,6 +63,7 @@
     <string name="debug_title">Debug</string>
     <string name="debug_asr_prompt_threshold">ASR Prompt Threshold: %1$d</string>
     <string name="debug_asr_retry_delay_ms">ASR Retry Delay: %1$d ms</string>
+    <string name="debug_asr_stop_start_cooldown_ms">ASR Stop-Start Cooldown: %1$d ms</string>
     <string name="debug_reset_asr_tuning">Reset ASR Tuning</string>
     <string name="debug_all_bridge_checks">All Bridge Checks: %1$s</string>
     <string name="debug_check_all_bridge">Check All Bridge</string>

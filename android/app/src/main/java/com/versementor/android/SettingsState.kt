@@ -22,6 +22,7 @@ data class SettingsState(
     val variantTtlDays: Int = 7,
     val transientAsrPromptThreshold: Int = 3,
     val transientAsrRetryDelayMs: Int = 350,
+    val asrStopToStartCooldownMs: Int = 220,
     val dynastyMappings: List<String> = emptyList(),
     val authors: List<String> = emptyList(),
     val ttsVoices: List<VoiceOption> = emptyList()

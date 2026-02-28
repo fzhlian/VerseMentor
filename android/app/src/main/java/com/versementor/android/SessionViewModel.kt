@@ -37,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.random.Random
 
 class SessionViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
@@ -44,10 +45,13 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         const val MAX_VARIANT_TTL_DAYS = 365
         const val DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD = 3
         const val DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS = 350
+        const val DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS = 220
         const val MIN_TRANSIENT_ASR_PROMPT_THRESHOLD = 1
         const val MAX_TRANSIENT_ASR_PROMPT_THRESHOLD = 10
         const val MIN_TRANSIENT_ASR_RETRY_DELAY_MS = 100
         const val MAX_TRANSIENT_ASR_RETRY_DELAY_MS = 2000
+        const val MIN_ASR_STOP_TO_START_COOLDOWN_MS = 80
+        const val MAX_ASR_STOP_TO_START_COOLDOWN_MS = 1200
         private const val MAX_VARIANTS_PER_LINE = 4
         private const val MAX_UI_LOG_LINES = 200
     }
@@ -390,12 +394,26 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         if (uiState.awaitingSpeech) {
             return
         }
+        val started = speech.startListening()
+        if (started) {
+            uiState = uiState.copy(
+                statusText = text(R.string.waiting_input),
+                awaitingSpeech = true,
+                liveHeard = ""
+            )
+            return
+        }
         uiState = uiState.copy(
-            statusText = text(R.string.waiting_input),
-            awaitingSpeech = true,
-            liveHeard = ""
+            awaitingSpeech = false,
+            statusText = resolveStatusText(state.type, awaitingSpeech = false),
+            logs = appendLog("ASR start not ready, schedule retry")
         )
-        speech.startListening()
+        if (!uiState.sessionActive || uiState.sessionPaused || isManuallyPaused || isSpeaking) {
+            return
+        }
+        scheduleTransientAsrRetry(
+            delayMs = settings.transientAsrRetryDelayMs.coerceAtMost(200)
+        )
     }
 
     private fun resetStateMachine() {
@@ -530,9 +548,14 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             transientAsrRetryDelayMs = loaded.transientAsrRetryDelayMs.coerceIn(
                 MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
                 MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+            ),
+            asrStopToStartCooldownMs = loaded.asrStopToStartCooldownMs.coerceIn(
+                MIN_ASR_STOP_TO_START_COOLDOWN_MS,
+                MAX_ASR_STOP_TO_START_COOLDOWN_MS
             )
         )
         settings = normalized
+        applyAsrTuningToSpeech(normalized)
         if (normalized != loaded) {
             prefs.saveSettings(normalized)
         }
@@ -620,21 +643,46 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         uiState = uiState.copy(logs = appendLog("Debug: ASR retry delay -> ${normalized}ms"))
     }
 
+    fun setAsrStopToStartCooldownMs(delayMs: Int) {
+        val normalized = delayMs.coerceIn(MIN_ASR_STOP_TO_START_COOLDOWN_MS, MAX_ASR_STOP_TO_START_COOLDOWN_MS)
+        if (normalized == settings.asrStopToStartCooldownMs) return
+        settings = settings.copy(asrStopToStartCooldownMs = normalized)
+        prefs.saveSettings(settings)
+        applyAsrTuningToSpeech()
+        uiState = uiState.copy(logs = appendLog("Debug: ASR stop-start cooldown -> ${normalized}ms"))
+    }
+
     fun resetTransientAsrTuning() {
         if (
             settings.transientAsrPromptThreshold == DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD &&
-            settings.transientAsrRetryDelayMs == DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS
+            settings.transientAsrRetryDelayMs == DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS &&
+            settings.asrStopToStartCooldownMs == DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS
         ) return
         settings = settings.copy(
             transientAsrPromptThreshold = DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD,
-            transientAsrRetryDelayMs = DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS
+            transientAsrRetryDelayMs = DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS,
+            asrStopToStartCooldownMs = DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS
         )
         prefs.saveSettings(settings)
+        applyAsrTuningToSpeech()
         uiState = uiState.copy(
             logs = appendLog(
-                "Debug: ASR tuning reset -> threshold=$DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD, delay=${DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS}ms"
+                "Debug: ASR tuning reset -> threshold=$DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD, delay=${DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS}ms, cooldown=${DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS}ms"
             )
         )
+    }
+
+    fun getAsrLogs(): List<String> {
+        return uiState.logs.filter(::isAsrLogLine)
+    }
+
+    fun getAsrLogText(): String {
+        return getAsrLogs().joinToString(separator = "\n")
+    }
+
+    fun clearAsrLogs() {
+        val retained = uiState.logs.filterNot(::isAsrLogLine)
+        uiState = uiState.copy(logs = retained)
     }
 
     fun clearVariantCache() {
@@ -829,15 +877,26 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun isTransientAsrError(code: Int): Boolean {
-        return code == SpeechRecognizer.ERROR_NO_MATCH ||
+        return code == SpeechRecognizer.ERROR_AUDIO ||
+            code == SpeechRecognizer.ERROR_NO_MATCH ||
             code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
             code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
     }
 
-    private fun scheduleTransientAsrRetry() {
+    private fun scheduleTransientAsrRetry(delayMs: Int = settings.transientAsrRetryDelayMs) {
         transientRetryJob?.cancel()
+        val baseDelayMs = delayMs.coerceIn(
+            MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+            MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+        )
+        val jitterBound = (baseDelayMs / 4).coerceIn(40, 250)
+        val jitter = Random.nextInt(from = -jitterBound, until = jitterBound + 1)
+        val actualDelayMs = (baseDelayMs + jitter).coerceIn(
+            MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+            MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+        )
         transientRetryJob = viewModelScope.launch(Dispatchers.Main.immediate) {
-            delay(settings.transientAsrRetryDelayMs.toLong())
+            delay(actualDelayMs.toLong())
             if (!uiState.sessionActive || uiState.sessionPaused || isManuallyPaused) {
                 return@launch
             }
@@ -852,6 +911,14 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private fun appendLog(line: String): List<String> {
         val next = uiState.logs + line
         return if (next.size > MAX_UI_LOG_LINES) next.takeLast(MAX_UI_LOG_LINES) else next
+    }
+
+    private fun applyAsrTuningToSpeech(source: SettingsState = settings) {
+        speech.setStopToStartCooldownMs(source.asrStopToStartCooldownMs)
+    }
+
+    private fun isAsrLogLine(line: String): Boolean {
+        return line.contains("ASR")
     }
 
     override fun onCleared() {

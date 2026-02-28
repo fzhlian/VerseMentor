@@ -19,6 +19,7 @@ class PreferenceStore(context: Context) {
         val variantTtlDays = prefs.getInt("variantTtlDays", 7)
         val transientAsrPromptThreshold = prefs.getInt("transientAsrPromptThreshold", 3)
         val transientAsrRetryDelayMs = prefs.getInt("transientAsrRetryDelayMs", 350)
+        val asrStopToStartCooldownMs = prefs.getInt("asrStopToStartCooldownMs", 220)
 
         val accentJson = prefs.getString("accentTolerance", null)
         val accent = accentJson?.let {
@@ -42,6 +43,7 @@ class PreferenceStore(context: Context) {
             variantTtlDays = variantTtlDays,
             transientAsrPromptThreshold = transientAsrPromptThreshold,
             transientAsrRetryDelayMs = transientAsrRetryDelayMs,
+            asrStopToStartCooldownMs = asrStopToStartCooldownMs,
             dynastyMappings = mappings,
             authors = authors
         )
@@ -57,6 +59,7 @@ class PreferenceStore(context: Context) {
             .putInt("variantTtlDays", settings.variantTtlDays)
             .putInt("transientAsrPromptThreshold", settings.transientAsrPromptThreshold)
             .putInt("transientAsrRetryDelayMs", settings.transientAsrRetryDelayMs)
+            .putInt("asrStopToStartCooldownMs", settings.asrStopToStartCooldownMs)
             .putString("accentTolerance", gson.toJson(settings.accentTolerance))
             .putString("dynastyMappings", gson.toJson(settings.dynastyMappings))
             .putString("authors", gson.toJson(settings.authors))

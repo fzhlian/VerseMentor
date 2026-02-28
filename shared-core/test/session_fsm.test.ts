@@ -281,6 +281,34 @@ describe('session_fsm', () => {
     expect(output.actions).toContainEqual({ type: 'START_LISTENING' })
   })
 
+  test('confirm candidate with traditional queren utterance should proceed to dynasty-author stage', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '確認',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+    expect(output.state.ctx.selectedPoem?.title).toBe('静夜思')
+    expect(output.actions[0]).toEqual({
+      type: 'SPEAK',
+      text: '已选择《静夜思》。请说出朝代和作者。'
+    })
+    expect(output.actions.some((action) => action.type === 'FETCH_VARIANTS')).toBe(true)
+    expect(output.actions).toContainEqual({ type: 'START_LISTENING' })
+  })
+
   test('confirm candidate with question containing shi should not auto-confirm', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)
@@ -348,6 +376,32 @@ describe('session_fsm', () => {
     const output = sessionReducer(confirmState, {
       type: 'USER_ASR',
       text: '是这首呢',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
+  test('confirm candidate with traditional question tone me should not auto-confirm', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '是這首麼',
       isFinal: true
     })
 

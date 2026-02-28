@@ -168,6 +168,31 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun confirmPoemCandidate_whenUtteranceIsTraditionalAffirmativeQueRen_confirmsPoem() {
+        val state = stateOf(SessionStateType.CONFIRM_POEM_CANDIDATE) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u78ba\u8a8d",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 301056L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_DYNASTY_AUTHOR, output.state.type)
+        assertEquals("\u9759\u591c\u601d", output.state.ctx.selectedPoem?.title)
+        assertEquals(
+            "\u5df2\u9009\u62e9\u300a\u9759\u591c\u601d\u300b\u3002\u8bf7\u8bf4\u51fa\u671d\u4ee3\u548c\u4f5c\u8005\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+        assertTrue(output.actions.any { it is SessionAction.FetchVariants })
+    }
+
+    @Test
     fun confirmPoemCandidate_whenUtteranceIsQuestionShiMa_shouldNotAutoConfirm() {
         val state = stateOf(SessionStateType.CONFIRM_POEM_CANDIDATE) {
             selectedPoem = SamplePoems.poems.first()
@@ -228,6 +253,30 @@ class SessionFsmPoemTitleMatchTest {
                 isFinal = true,
                 confidence = 0.95f,
                 now = 30109L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertNull(output.state.ctx.selectedPoem)
+        assertEquals(
+            "\u6ca1\u6709\u786e\u8ba4\u5230\u9898\u76ee\uff0c\u8bf7\u518d\u8bf4\u4e00\u6b21\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
+    fun confirmPoemCandidate_whenUtteranceHasTraditionalQuestionToneMe_shouldNotAutoConfirm() {
+        val state = stateOf(SessionStateType.CONFIRM_POEM_CANDIDATE) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u662f\u9019\u9996\u9ebc",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30110L
             )
         )
 

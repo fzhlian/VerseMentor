@@ -602,6 +602,56 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun reciting_whenBuBeiSongLeIntent_shouldExitSession() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.RECITING) {
+            selectedPoem = poem
+            currentLineIdx = 0
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u4e0d\u80cc\u8aa6\u4e86",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 301166L
+            )
+        )
+
+        assertEquals(SessionStateType.EXIT, output.state.type)
+        assertEquals(
+            "\u597d\u7684\uff0c\u5df2\u7ed3\u675f\u4f1a\u8bdd\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
+    fun reciting_whenBuBeiShiLeIntent_shouldExitSession() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.RECITING) {
+            selectedPoem = poem
+            currentLineIdx = 0
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u4e0d\u80cc\u8a69\u4e86",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 301167L
+            )
+        )
+
+        assertEquals(SessionStateType.EXIT, output.state.type)
+        assertEquals(
+            "\u597d\u7684\uff0c\u5df2\u7ed3\u675f\u4f1a\u8bdd\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun reciting_whenBuyongBeiShiLeIntent_shouldExitSession() {
         val poem = SamplePoems.poems.first()
         val state = stateOf(SessionStateType.RECITING) {

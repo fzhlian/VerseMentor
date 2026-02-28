@@ -142,7 +142,7 @@ function buildRepeatReply(stateType: SessionStateType, ctx: SessionContext): str
 }
 
 const REJECT_POEM_KEYWORDS = ['不是', '不对', '不要', '错了', '换一个']
-const QUESTION_MARKERS = ['吗', '嘛', '么']
+const QUESTION_MARKERS = ['吗', '嘛', '么', '呢']
 const CONFIRM_POEM_EXACT = new Set([
   '是',
   '是的',

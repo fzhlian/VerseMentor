@@ -167,6 +167,30 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun confirmPoemCandidate_whenUtteranceHasQuestionToneNe_shouldNotAutoConfirm() {
+        val state = stateOf(SessionStateType.CONFIRM_POEM_CANDIDATE) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u662f\u8fd9\u9996\u5462",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30109L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertNull(output.state.ctx.selectedPoem)
+        assertEquals(
+            "\u6ca1\u6709\u786e\u8ba4\u5230\u9898\u76ee\uff0c\u8bf7\u518d\u8bf4\u4e00\u6b21\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun confirmPoemCandidate_whenUtteranceHasQuestionPunctuation_shouldNotAutoConfirm() {
         val state = stateOf(SessionStateType.CONFIRM_POEM_CANDIDATE) {
             selectedPoem = SamplePoems.poems.first()

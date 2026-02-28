@@ -427,7 +427,7 @@ class SessionReducer {
         ) {
             return true
         }
-        if (raw.contains("吗") || raw.contains("嘛") || raw.contains("么")) return false
+        if (raw.contains("吗") || raw.contains("嘛") || raw.contains("么") || raw.contains("呢")) return false
         return raw.contains("就是这首") ||
             raw.contains("确认这首") ||
             raw.contains("是这首") ||

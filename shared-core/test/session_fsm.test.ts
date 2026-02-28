@@ -279,6 +279,32 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('confirm candidate with question tone ne should not auto-confirm', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const confirmState = {
+      ...initial,
+      type: 'CONFIRM_POEM_CANDIDATE' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(confirmState, {
+      type: 'USER_ASR',
+      text: '是这首呢',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '没有确认到题目，请再说一次题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
   test('confirm candidate with question punctuation should not auto-confirm', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)

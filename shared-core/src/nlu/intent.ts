@@ -56,7 +56,8 @@ export function parseIntent(text: string): { type: IntentType; slots: Record<str
     raw.includes('吗') ||
     raw.includes('嘛') ||
     raw.includes('么') ||
-    raw.includes('嗎')
+    raw.includes('嗎') ||
+    raw.includes('呢')
   const slots: Record<string, string> = {}
 
   if (!raw) return { type: IntentType.UNKNOWN, slots }

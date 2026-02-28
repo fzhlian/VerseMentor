@@ -32,6 +32,7 @@ describe('intent parser', () => {
     expect(parseIntent('\u63db\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)
     expect(parseIntent('\u518d\u4f86\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)
     expect(parseIntent('\u518d\u4f86\u9996').type).toBe(IntentType.NEXT_POEM)
+    expect(parseIntent('\u91cd\u4f86\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)
     expect(parseIntent('\u518d\u4f86').type).toBe(IntentType.UNKNOWN)
     expect(parseIntent('\u958b\u59cb\u80cc\u8aa6').type).toBe(IntentType.START_RECITE)
     expect(parseIntent('\u80cc\u8a69 \u975c\u591c\u601d').type).toBe(IntentType.RECITE_POEM)

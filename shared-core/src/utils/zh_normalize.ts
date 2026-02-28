@@ -36,6 +36,7 @@ const TRAD_TO_SIMP: Record<string, string> = {
   這: '这',
   沒: '没',
   錯: '错',
+  複: '复',
   確: '确',
   認: '认',
   麼: '么',

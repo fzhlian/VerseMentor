@@ -116,6 +116,20 @@ describe('session_fsm', () => {
     expect(afterAsr.state.ctx.selectedPoem?.title).toBe('静夜思')
   })
 
+  test('traditional recite utterance containing title should select poem directly', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const started = sessionReducer(initial, { type: 'USER_UI_START' })
+    const afterAsr = sessionReducer(started.state, {
+      type: 'USER_ASR',
+      text: '我想背誦靜夜思',
+      isFinal: true
+    })
+
+    expect(afterAsr.state.type).toBe('WAIT_DYNASTY_AUTHOR')
+    expect(afterAsr.state.ctx.selectedPoem?.title).toBe('静夜思')
+  })
+
   test('generic recite command without title should not force fuzzy confirm', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)
@@ -400,6 +414,33 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('traditional exit command exits active session and stops listening', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession({ ...ctx, lastUserActiveAt: now })
+    const reciting = {
+      ...initial,
+      type: 'RECITING' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 0,
+        lastUserActiveAt: now
+      }
+    }
+
+    const output = sessionReducer(reciting, {
+      type: 'USER_ASR',
+      text: '結束',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('EXIT')
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '好的，已结束会话。' },
+      { type: 'STOP_LISTENING' }
+    ])
+  })
+
   test('repeat prompt command replays current prompt in WAIT_POEM_NAME', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)
@@ -611,6 +652,32 @@ describe('session_fsm', () => {
     expect(output.state.ctx.dynastyResolved).toBeUndefined()
     expect(output.state.ctx.authorResolved).toBeUndefined()
     expect(output.state.ctx.variantsCacheEntry).toBeNull()
+    expect(output.state.ctx.currentLineIdx).toBe(0)
+    expect(output.state.ctx.reciteProgress).toEqual([])
+  })
+
+  test('finished traditional next-poem command should reset poem-scoped session context', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const finished = {
+      ...initial,
+      type: 'FINISHED' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 2,
+        reciteProgress: [{ idx: 0, passed: true, score: 1 }]
+      }
+    }
+
+    const output = sessionReducer(finished, {
+      type: 'USER_ASR',
+      text: '換一首',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
     expect(output.state.ctx.currentLineIdx).toBe(0)
     expect(output.state.ctx.reciteProgress).toEqual([])
   })

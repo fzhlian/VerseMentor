@@ -70,6 +70,7 @@ class SessionReducer {
             '認' to '认',
             '麼' to '么',
             '講' to '讲',
+            '聽' to '听',
             '說' to '说',
             '續' to '续'
         )
@@ -484,6 +485,8 @@ class SessionReducer {
             raw.contains("再说一次") ||
             raw.contains("再讲一遍") ||
             raw.contains("再讲一次") ||
+            raw.contains("再听一遍") ||
+            raw.contains("再听一次") ||
             raw.contains("重复") ||
             raw.contains("再来一次") ||
             raw.contains("再来一遍") ||

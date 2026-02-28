@@ -446,6 +446,7 @@ class SessionReducer {
         if (raw.isEmpty()) return false
         return raw.contains("下一首") ||
             raw.contains("换一首") ||
+            raw.contains("换首") ||
             raw.contains("换诗") ||
             raw.contains("再来一首") ||
             raw.contains("再来首") ||

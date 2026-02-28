@@ -30,6 +30,7 @@ describe('intent parser', () => {
   test('recognizes common traditional command variants', () => {
     expect(parseIntent('\u7d50\u675f\u3002').type).toBe(IntentType.EXIT_SESSION)
     expect(parseIntent('\u63db\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)
+    expect(parseIntent('\u63db\u9996').type).toBe(IntentType.NEXT_POEM)
     expect(parseIntent('\u518d\u4f86\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)
     expect(parseIntent('\u518d\u4f86\u9996').type).toBe(IntentType.NEXT_POEM)
     expect(parseIntent('\u91cd\u4f86\u4e00\u9996').type).toBe(IntentType.NEXT_POEM)

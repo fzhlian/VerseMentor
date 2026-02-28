@@ -543,6 +543,27 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun waitPoemName_whenRepeatUtteranceContainsHintWords_shouldReplayPrompt() {
+        val state = stateOf(SessionStateType.WAIT_POEM_NAME)
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u5e2e\u6211\u91cd\u590d",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30120L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertEquals(
+            "\u4f60\u597d\uff0c\u6b22\u8fce\u80cc\u8bf5\u8bd7\u8bcd\u3002\u8bf7\u8bf4\u51fa\u8bd7\u8bcd\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun waitDynastyAuthor_whenBothDynastyAndAuthorProvided_entersReciteReady() {
         val poem = SamplePoems.poems.first()
         val state = stateOf(SessionStateType.WAIT_DYNASTY_AUTHOR) {

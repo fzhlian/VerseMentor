@@ -63,9 +63,9 @@ export function parseIntent(text: string): { type: IntentType; slots: Record<str
   if (!raw) return { type: IntentType.UNKNOWN, slots }
 
   if (includesAny(normalized, KEYWORDS_NORM.exit)) return { type: IntentType.EXIT_SESSION, slots }
+  if (includesAny(normalized, KEYWORDS_NORM.repeat)) return { type: IntentType.REPEAT_PROMPT, slots }
   if (includesAny(normalized, KEYWORDS_NORM.hint)) return { type: IntentType.ASK_HINT, slots }
   if (includesAny(normalized, KEYWORDS_NORM.next)) return { type: IntentType.NEXT_POEM, slots }
-  if (includesAny(normalized, KEYWORDS_NORM.repeat)) return { type: IntentType.REPEAT_PROMPT, slots }
   if (includesAny(normalized, KEYWORDS_NORM.start)) return { type: IntentType.START_RECITE, slots }
   if (includesAny(normalized, KEYWORDS_NORM.reject)) return { type: IntentType.REJECT_POEM, slots }
 

@@ -592,6 +592,23 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('repeat command with hint words replays current prompt in WAIT_POEM_NAME', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const started = sessionReducer(initial, { type: 'USER_UI_START' })
+    const repeated = sessionReducer(started.state, {
+      type: 'USER_ASR',
+      text: '帮我重复',
+      isFinal: true
+    })
+
+    expect(repeated.state.type).toBe('WAIT_POEM_NAME')
+    expect(repeated.actions).toEqual([
+      { type: 'SPEAK', text: '你好，欢迎背诵诗词。请说出诗词题目。' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
   test('traditional futi repeat command replays current prompt in WAIT_POEM_NAME', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)

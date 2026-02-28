@@ -39,4 +39,9 @@ describe('intent parser', () => {
     expect(parseIntent('\u91cd\u4f86\u4e00\u904d').type).toBe(IntentType.REPEAT_PROMPT)
     expect(parseIntent('\u518d\u4f86\u4e00\u904d').type).toBe(IntentType.REPEAT_PROMPT)
   })
+
+  test('repeat intent takes precedence when utterance also contains hint words', () => {
+    expect(parseIntent('\u5e2e\u6211\u91cd\u590d').type).toBe(IntentType.REPEAT_PROMPT)
+    expect(parseIntent('\u5e6b\u6211\u91cd\u8907').type).toBe(IntentType.REPEAT_PROMPT)
+  })
 })

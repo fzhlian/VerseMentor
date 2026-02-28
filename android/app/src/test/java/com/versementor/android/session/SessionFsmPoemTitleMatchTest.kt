@@ -214,6 +214,76 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun finished_whenTraditionalNextPoemIntent_shouldRestart() {
+        val state = stateOf(SessionStateType.FINISHED) {
+            selectedPoem = SamplePoems.poems.first()
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u63db\u4e00\u9996",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30115L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertNull(output.state.ctx.selectedPoem)
+        assertEquals(
+            "\u597d\u7684\uff0c\u8bf7\u8bf4\u51fa\u4e0b\u4e00\u9996\u8bd7\u7684\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
+    fun reciting_whenTraditionalExitIntent_shouldExitSession() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.RECITING) {
+            selectedPoem = poem
+            currentLineIdx = 0
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u7d50\u675f",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30116L
+            )
+        )
+
+        assertEquals(SessionStateType.EXIT, output.state.type)
+        assertEquals(
+            "\u597d\u7684\uff0c\u5df2\u7ed3\u675f\u4f1a\u8bdd\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
+    fun waitPoemName_whenTraditionalRepeatIntent_shouldReplayPrompt() {
+        val state = stateOf(SessionStateType.WAIT_POEM_NAME)
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u518d\u8aaa\u4e00\u904d",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 30117L
+            )
+        )
+
+        assertEquals(SessionStateType.WAIT_POEM_NAME, output.state.type)
+        assertEquals(
+            "\u4f60\u597d\uff0c\u6b22\u8fce\u80cc\u8bf5\u8bd7\u8bcd\u3002\u8bf7\u8bf4\u51fa\u8bd7\u8bcd\u9898\u76ee\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
     fun waitDynastyAuthor_whenBothDynastyAndAuthorProvided_entersReciteReady() {
         val poem = SamplePoems.poems.first()
         val state = stateOf(SessionStateType.WAIT_DYNASTY_AUTHOR) {
@@ -354,6 +424,31 @@ class SessionFsmPoemTitleMatchTest {
                 isFinal = true,
                 confidence = 0.95f,
                 now = 4010L
+            )
+        )
+
+        assertEquals(SessionStateType.HINT_GIVEN, output.state.type)
+        assertEquals(
+            "\u63d0\u793a\uff1a\u5e8a\u524d\u2026",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+    }
+
+    @Test
+    fun reciting_whenTraditionalHintIntent_entersHintGiven() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.RECITING) {
+            selectedPoem = poem
+            currentLineIdx = 0
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = "\u7d66\u63d0\u793a",
+                isFinal = true,
+                confidence = 0.95f,
+                now = 40101L
             )
         )
 

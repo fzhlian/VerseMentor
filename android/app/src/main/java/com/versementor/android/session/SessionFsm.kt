@@ -51,6 +51,20 @@ sealed class SessionAction {
 class SessionReducer {
     private companion object {
         const val MIN_FUZZY_TITLE_SCORE = 0.22
+        val TRAD_TO_SIMP: Map<Char, Char> = mapOf(
+            '開' to '开',
+            '結' to '结',
+            '換' to '换',
+            '詩' to '诗',
+            '誦' to '诵',
+            '對' to '对',
+            '給' to '给',
+            '幫' to '帮',
+            '嗎' to '吗',
+            '這' to '这',
+            '說' to '说',
+            '續' to '续'
+        )
     }
 
     fun reduce(state: SessionState, event: SessionEvent): SessionOutput {
@@ -366,7 +380,7 @@ class SessionReducer {
     }
 
     private fun isExitIntent(text: String): Boolean {
-        val raw = text.trim()
+        val raw = normalizeForIntent(text)
         if (raw.isEmpty()) return false
         return raw.contains("退出") || raw.contains("结束") || raw.contains("停止") || raw.contains("不背了")
     }
@@ -420,7 +434,7 @@ class SessionReducer {
     }
 
     private fun isNextPoemIntent(text: String): Boolean {
-        val raw = text.trim()
+        val raw = normalizeForIntent(text)
         if (raw.isEmpty()) return false
         return raw.contains("下一首") ||
             raw.contains("换一首") ||
@@ -430,7 +444,7 @@ class SessionReducer {
     }
 
     private fun isAskHintIntent(text: String): Boolean {
-        val raw = text.trim()
+        val raw = normalizeForIntent(text)
         if (raw.isEmpty()) return false
         return raw.contains("提示") ||
             raw.contains("给提示") ||
@@ -440,13 +454,19 @@ class SessionReducer {
     }
 
     private fun normalizeForIntent(text: String): String {
-        return text.trim().lowercase().replace(Regex("[\\p{P}\\p{S}\\s]+"), "")
+        val lowered = text.trim().lowercase()
+        if (lowered.isEmpty()) return ""
+        val sb = StringBuilder(lowered.length)
+        for (ch in lowered) {
+            sb.append(TRAD_TO_SIMP[ch] ?: ch)
+        }
+        return sb.toString().replace(Regex("[\\p{P}\\p{S}\\s]+"), "")
     }
 
     private fun isRepeatIntent(text: String): Boolean {
-        val raw = text.trim()
+        val raw = normalizeForIntent(text)
         if (raw.isEmpty()) return false
-        return raw.contains("再说一遍") || raw.contains("重复")
+        return raw.contains("再说一遍") || raw.contains("重复") || raw.contains("再来一次")
     }
 
     private fun buildRepeatReply(type: SessionStateType, ctx: SessionContext): String? {

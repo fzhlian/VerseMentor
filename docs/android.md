@@ -17,6 +17,14 @@ cd android
 .\gradlew.bat assembleDebug
 ```
 
+Build signed release APK (upgrade-safe):
+```
+cd android
+.\scripts\gradlew-with-jdk.cmd :app:assembleRelease --console=plain
+```
+Release output path:
+- `android/app/build/outputs/apk/release/app-release.apk`
+
 Preflight check:
 ```
 cd android
@@ -43,6 +51,7 @@ Notes:
 - Microphone permission is required for ASR.
 - Internet permission is included for optional online variant fetching.
 - TTS requires a Chinese voice installed on the device.
+- Release build now uses a fixed signing config in `android/app/build.gradle.kts`, defaulting to `android/keystore/versementor-release.jks` (alias/password values also defined there, overridable by Gradle properties). As long as this keystore remains unchanged, future upgrades will not hit signature-conflict install errors.
 - Home background image is loaded from `android/app/src/main/res/drawable/home_background.png` (current file synced from repo root `Background-no.png`).
 - ASR integration now suppresses expected client errors caused by app-initiated `stopListening()` and exposes ASR debug traces in session logs.
 - If `RECORD_AUDIO` permission is missing, ASR start is blocked before recognizer invocation, and session enters paused state with microphone-permission status text (no reducer error TTS loop).

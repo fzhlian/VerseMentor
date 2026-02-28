@@ -9,6 +9,22 @@ val useSharedCoreReducer: Boolean = (project.findProperty("useSharedCoreReducer"
     ?.lowercase()
     ?.let { it == "true" || it == "1" || it == "yes" || it == "on" }
     ?: false
+val releaseStoreFilePath: String =
+    (project.findProperty("releaseStoreFile") as String?)?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "${rootDir}/keystore/versementor-release.jks"
+val releaseStorePassword: String =
+    (project.findProperty("releaseStorePassword") as String?)?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "android"
+val releaseKeyAlias: String =
+    (project.findProperty("releaseKeyAlias") as String?)?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "androiddebugkey"
+val releaseKeyPassword: String =
+    (project.findProperty("releaseKeyPassword") as String?)?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "android"
 
 fun quoteForBuildConfig(value: String): String {
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -26,6 +42,21 @@ android {
         versionName = "0.4.8"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(releaseStoreFilePath)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+        }
     }
 
     buildFeatures {

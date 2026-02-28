@@ -634,6 +634,31 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('repeat phrase chonglaiyibian in FINISHED should replay prompt instead of switching poem', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const finished = {
+      ...initial,
+      type: 'FINISHED' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0]
+      }
+    }
+
+    const output = sessionReducer(finished, {
+      type: 'USER_ASR',
+      text: '重来一遍',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('FINISHED')
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '还要再来一首吗？' },
+      { type: 'START_LISTENING' }
+    ])
+  })
+
   test('ui stop exits from active reciting state', () => {
     const ctx = makeCtx()
     const initial = createInitialSession({ ...ctx, lastUserActiveAt: now })

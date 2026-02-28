@@ -477,7 +477,9 @@ class SessionReducer {
         return raw.contains("再说一遍") ||
             raw.contains("重复") ||
             raw.contains("再来一次") ||
-            raw.contains("再来一遍")
+            raw.contains("再来一遍") ||
+            raw.contains("重来一次") ||
+            raw.contains("重来一遍")
     }
 
     private fun buildRepeatReply(type: SessionStateType, ctx: SessionContext): String? {

@@ -867,6 +867,32 @@ describe('session_fsm', () => {
     expect(output.state.ctx.reciteProgress).toEqual([])
   })
 
+  test('finished zailaishou command should reset poem-scoped session context', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const finished = {
+      ...initial,
+      type: 'FINISHED' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 2,
+        reciteProgress: [{ idx: 0, passed: true, score: 1 }]
+      }
+    }
+
+    const output = sessionReducer(finished, {
+      type: 'USER_ASR',
+      text: '再来首',
+      isFinal: true
+    })
+
+    expect(output.state.type).toBe('WAIT_POEM_NAME')
+    expect(output.state.ctx.selectedPoem).toBeUndefined()
+    expect(output.state.ctx.currentLineIdx).toBe(0)
+    expect(output.state.ctx.reciteProgress).toEqual([])
+  })
+
   test('finished traditional zailaiyishou command should reset poem-scoped session context', () => {
     const ctx = makeCtx()
     const initial = createInitialSession(ctx)

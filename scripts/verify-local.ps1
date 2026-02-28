@@ -4,6 +4,7 @@ param(
     [switch]$SkipSharedCoreBuild = $false,
     [switch]$SkipSharedCoreBridgeBuild = $false,
     [switch]$SkipSharedCoreTests = $false,
+    [switch]$SkipHarmonySync = $false,
     [switch]$SkipUnitTests = $false,
     [switch]$DryRun = $false
 )
@@ -13,6 +14,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $androidDir = Join-Path $repoRoot "android"
 $sharedCoreDir = Join-Path $repoRoot "shared-core"
+$harmonySyncScript = Join-Path $repoRoot "scripts\check-harmony-shared-sync.ps1"
 $resolvedAndroidJdk = $null
 
 $steps = @()
@@ -86,6 +88,14 @@ if (-not $SkipSharedCore) {
             Workdir = $sharedCoreDir
             Command = @("npm.cmd", "test")
         }
+    }
+}
+
+if (-not $SkipHarmonySync) {
+    $steps += @{
+        Name = "Harmony shared sync check"
+        Workdir = $repoRoot
+        Command = @("powershell", "-ExecutionPolicy", "Bypass", "-File", $harmonySyncScript)
     }
 }
 

@@ -1,3 +1,10 @@
+import {
+  DEFAULT_MIN_FUZZY_TITLE_SCORE,
+  DEFAULT_TITLE_SELECT_SCORE,
+  normalizeAscii,
+  resolveTitleScore
+} from './title_matcher'
+
 interface BridgeHost {
   [key: string]: unknown
 }
@@ -70,7 +77,15 @@ function getHost(): BridgeHost {
 }
 
 function normalize(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return normalizeAscii(input)
+}
+
+const TITLE_SELECT_SCORE = DEFAULT_TITLE_SELECT_SCORE
+const MIN_FUZZY_TITLE_SCORE = DEFAULT_MIN_FUZZY_TITLE_SCORE
+const DRIVER_POEM_TITLE_ALIASES = [DRIVER_POEM.title, 'jingye']
+
+function resolveDriverPoemTitleScore(query: string): number {
+  return resolveTitleScore(query, DRIVER_POEM_TITLE_ALIASES, MIN_FUZZY_TITLE_SCORE)
 }
 
 function createInitialState(): DriverState {
@@ -220,7 +235,8 @@ function reduceDriver(state: DriverState, event: DriverEvent): DriverOutput {
   }
 
   if (state.type === 'WAIT_POEM_NAME') {
-    if (normalized.indexOf('jingyesi') >= 0 || normalized.indexOf('jingye') >= 0) {
+    const titleScore = resolveDriverPoemTitleScore(normalized)
+    if (titleScore >= TITLE_SELECT_SCORE) {
       const next: DriverState = {
         type: 'WAIT_DYNASTY_AUTHOR',
         ctx: { currentLineIdx: 0, selectedPoem: DRIVER_POEM }

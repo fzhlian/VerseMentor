@@ -1,4 +1,10 @@
 import { GlobalFunctionSharedCoreRuntime, SharedCoreRuntime } from './shared_core_runtime'
+import {
+  DEFAULT_MIN_FUZZY_TITLE_SCORE,
+  DEFAULT_TITLE_SELECT_SCORE,
+  normalizeAscii,
+  resolveTitleScore
+} from './title_matcher'
 
 export type SessionShellStage =
   | 'IDLE'
@@ -65,7 +71,15 @@ const MOCK_POEM: SessionPoemSeed = {
 }
 
 function normalizeZh(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]/g, '').trim()
+  return normalizeAscii(text)
+}
+
+const TITLE_SELECT_SCORE = DEFAULT_TITLE_SELECT_SCORE
+const MIN_FUZZY_TITLE_SCORE = DEFAULT_MIN_FUZZY_TITLE_SCORE
+const MOCK_POEM_TITLE_ALIASES = [MOCK_POEM.title, 'jingye']
+
+function resolveMockPoemTitleScore(query: string): number {
+  return resolveTitleScore(query, MOCK_POEM_TITLE_ALIASES, MIN_FUZZY_TITLE_SCORE)
 }
 
 export class SessionShellController {
@@ -233,8 +247,9 @@ export class SessionShellController {
       case 'IDLE':
         return this.handleStart()
 
-      case 'WAIT_POEM_NAME':
-        if (normalized.includes(normalizeZh(MOCK_POEM.title)) || normalized.includes('jingye')) {
+      case 'WAIT_POEM_NAME': {
+        const titleScore = resolveMockPoemTitleScore(normalized)
+        if (titleScore >= TITLE_SELECT_SCORE) {
           this.selectedPoemTitle = MOCK_POEM.title
           this.stage = 'WAIT_DYNASTY_AUTHOR'
           return this.speakAndListen(`Selected ${MOCK_POEM.title}. Say dynasty and author.`, [
@@ -249,6 +264,7 @@ export class SessionShellController {
           ])
         }
         return this.speakAndListen('Poem not found. Please repeat the title.')
+      }
 
       case 'WAIT_DYNASTY_AUTHOR': {
         const hasDynasty = normalized.includes(normalizeZh(MOCK_POEM.dynasty))

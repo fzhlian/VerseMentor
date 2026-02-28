@@ -1,4 +1,10 @@
 import { clearSharedCoreDelegateHooks, registerSharedCoreDelegateHooks } from './shared_core_bridge_host'
+import {
+  DEFAULT_MIN_FUZZY_TITLE_SCORE,
+  DEFAULT_TITLE_SELECT_SCORE,
+  normalizeAscii,
+  resolveTitleScore
+} from './title_matcher'
 
 interface DemoPoem {
   title: string
@@ -59,7 +65,15 @@ let mode: DemoSharedCoreDelegateMode = 'off'
 let delegateRegistrationToken: number | null = null
 
 function normalize(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return normalizeAscii(input)
+}
+
+const TITLE_SELECT_SCORE = DEFAULT_TITLE_SELECT_SCORE
+const MIN_FUZZY_TITLE_SCORE = DEFAULT_MIN_FUZZY_TITLE_SCORE
+const POEM_TITLE_ALIASES = [POEM.title, 'jingye']
+
+function resolvePoemTitleScore(query: string): number {
+  return resolveTitleScore(query, POEM_TITLE_ALIASES, MIN_FUZZY_TITLE_SCORE)
 }
 
 function createState(): DemoState {
@@ -144,7 +158,8 @@ function reduce(state: DemoState, event: DemoEvent): DemoOutput {
   const text = normalize(event.text ?? '')
 
   if (state.type === 'WAIT_POEM_NAME') {
-    if (text.indexOf('jingyesi') >= 0 || text.indexOf('jingye') >= 0) {
+    const titleScore = resolvePoemTitleScore(text)
+    if (titleScore >= TITLE_SELECT_SCORE) {
       const next: DemoState = { type: 'WAIT_DYNASTY_AUTHOR', ctx: { currentLineIdx: 0, selectedPoem: POEM } }
       return {
         state: next,

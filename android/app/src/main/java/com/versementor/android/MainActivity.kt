@@ -73,9 +73,17 @@ class MainActivity : ComponentActivity() {
                             HomeScreen(
                                 hasPermission = hasPermission,
                                 uiState = vm.uiState,
+                                asrLogCount = vm.getAsrLogs().size,
                                 onControlTap = { vm.onHomeButtonTap() },
                                 onControlLongPress = { vm.onHomeButtonLongPress() },
+                                onLogs = { navController.navigate("asr_logs") },
                                 onSettings = { navController.navigate("settings") }
+                            )
+                        }
+                        composable("asr_logs") {
+                            AsrLogsScreen(
+                                viewModel = vm,
+                                onBack = { navController.popBackStack() }
                             )
                         }
                         composable("settings") {

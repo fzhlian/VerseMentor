@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.runtime.Composable
@@ -58,8 +59,10 @@ import com.versementor.android.session.SessionUiState
 fun HomeScreen(
     hasPermission: Boolean,
     uiState: SessionUiState,
+    asrLogCount: Int,
     onControlTap: () -> Unit,
     onControlLongPress: () -> Unit,
+    onLogs: () -> Unit,
     onSettings: () -> Unit
 ) {
     val startInteractionSource = remember { MutableInteractionSource() }
@@ -92,7 +95,17 @@ fun HomeScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onLogs) {
+                    Text(
+                        text = stringResource(id = R.string.home_asr_logs_entry, asrLogCount),
+                        color = Color.White
+                    )
+                }
                 IconButton(onClick = onSettings) {
                     Icon(
                         imageVector = Icons.Filled.Menu,
@@ -189,6 +202,38 @@ fun HomeScreen(
 }
 
 @Composable
+fun AsrLogsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
+    val asrLogs = viewModel.getAsrLogs()
+    val clipboard = LocalClipboardManager.current
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = stringResource(id = R.string.asr_logs_title), style = MaterialTheme.typography.headlineSmall)
+            Button(onClick = onBack) { Text(text = stringResource(id = R.string.back)) }
+        }
+        Text(text = stringResource(id = R.string.asr_logs_count, asrLogs.size))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = asrLogs.isNotEmpty(),
+                onClick = { clipboard.setText(AnnotatedString(viewModel.getAsrLogText())) }
+            ) {
+                Text(text = stringResource(id = R.string.asr_logs_copy))
+            }
+            Button(
+                enabled = asrLogs.isNotEmpty(),
+                onClick = { viewModel.clearAsrLogs() }
+            ) {
+                Text(text = stringResource(id = R.string.asr_logs_clear))
+            }
+        }
+        LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(asrLogs.takeLast(80)) { line ->
+                Text(text = line)
+            }
+        }
+    }
+}
+
+@Composable
 fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     val ui = viewModel.uiState
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -209,7 +254,6 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
 @Composable
 fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     val settings = viewModel.settings
-    val clipboard = LocalClipboardManager.current
     var expanded by remember { mutableStateOf(false) }
     var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
     var ttlError by remember { mutableStateOf(false) }
@@ -491,29 +535,6 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         )
         Button(onClick = { viewModel.resetTransientAsrTuning() }) {
             Text(text = stringResource(id = R.string.debug_reset_asr_tuning))
-        }
-        val asrLogs = viewModel.getAsrLogs()
-        Text(text = stringResource(id = R.string.asr_logs_count, asrLogs.size))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = asrLogs.isNotEmpty(),
-                onClick = {
-                    clipboard.setText(AnnotatedString(viewModel.getAsrLogText()))
-                }
-            ) {
-                Text(text = stringResource(id = R.string.asr_logs_copy))
-            }
-            Button(
-                enabled = asrLogs.isNotEmpty(),
-                onClick = { viewModel.clearAsrLogs() }
-            ) {
-                Text(text = stringResource(id = R.string.asr_logs_clear))
-            }
-        }
-        LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-            items(asrLogs.takeLast(40)) { line ->
-                Text(text = line)
-            }
         }
         Text(text = stringResource(id = R.string.debug_all_bridge_checks, viewModel.allBridgeCheckResult))
         Button(onClick = { viewModel.runAllBridgeChecks() }) {

@@ -1,4 +1,4 @@
-﻿package com.versementor.android
+package com.versementor.android
 
 data class AccentToleranceState(
     val anAng: Boolean = true,
@@ -16,6 +16,11 @@ data class SettingsState(
     val followSystem: Boolean = true,
     val ttsVoiceId: String = "",
     val ttsVoiceName: String = "",
+    val speechProviderId: String = "iflytek",
+    val allowListeningDuringSpeaking: Boolean = true,
+    val bargeInMode: String = "stop_tts_on_speech",
+    val enableEchoCancellation: Boolean = true,
+    val enableNoiseSuppression: Boolean = true,
     val accentTolerance: AccentToleranceState = AccentToleranceState(),
     val toneRemind: Boolean = true,
     val variantsEnable: Boolean = true,
@@ -25,5 +30,6 @@ data class SettingsState(
     val asrStopToStartCooldownMs: Int = 220,
     val dynastyMappings: List<String> = emptyList(),
     val authors: List<String> = emptyList(),
-    val ttsVoices: List<VoiceOption> = emptyList()
+    val ttsVoices: List<VoiceOption> = emptyList(),
+    val speechProviders: List<VoiceOption> = emptyList()
 )

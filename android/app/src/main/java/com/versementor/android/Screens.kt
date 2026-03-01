@@ -268,7 +268,9 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
 fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     val settings = viewModel.settings
     val scrollState = rememberScrollState()
-    var expanded by remember { mutableStateOf(false) }
+    var providerExpanded by remember { mutableStateOf(false) }
+    var voiceExpanded by remember { mutableStateOf(false) }
+    var bargeModeExpanded by remember { mutableStateOf(false) }
     var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
     var ttlError by remember { mutableStateOf(false) }
     var transientPromptText by remember { mutableStateOf(settings.transientAsrPromptThreshold.toString()) }
@@ -283,6 +285,23 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     var groupIds by remember { mutableStateOf("") }
     var authorName by remember { mutableStateOf("") }
     var authorAlias by remember { mutableStateOf("") }
+    val providerOptions = if (settings.speechProviders.isNotEmpty()) {
+        settings.speechProviders
+    } else {
+        listOf(
+            VoiceOption(id = "iflytek", displayName = "iFlytek"),
+            VoiceOption(id = "volcengine", displayName = "Volcengine")
+        )
+    }
+    val selectedProviderName =
+        providerOptions.firstOrNull { it.id == settings.speechProviderId }?.displayName ?: settings.speechProviderId
+    val bargeInOptions = listOf(
+        "none" to stringResource(id = R.string.speech_barge_none),
+        "duck_tts" to stringResource(id = R.string.speech_barge_duck),
+        "stop_tts_on_speech" to stringResource(id = R.string.speech_barge_stop)
+    )
+    val selectedBargeInName =
+        bargeInOptions.firstOrNull { it.first == settings.bargeInMode }?.second ?: settings.bargeInMode
 
     LaunchedEffect(settings.variantTtlDays) {
         ttlText = settings.variantTtlDays.toString()
@@ -323,15 +342,61 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
             }
         }
 
+        Text(text = stringResource(id = R.string.speech_provider))
+        Button(onClick = { providerExpanded = true }) {
+            Text(text = selectedProviderName)
+        }
+        DropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
+            providerOptions.forEach { provider ->
+                DropdownMenuItem(text = { Text(provider.displayName) }, onClick = {
+                    viewModel.setSpeechProvider(provider.id)
+                    providerExpanded = false
+                })
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = stringResource(id = R.string.speech_allow_listen_while_speaking))
+            Switch(
+                checked = settings.allowListeningDuringSpeaking,
+                onCheckedChange = { viewModel.setAllowListeningDuringSpeaking(it) }
+            )
+        }
+        Text(text = stringResource(id = R.string.speech_barge_mode))
+        Button(onClick = { bargeModeExpanded = true }) {
+            Text(text = selectedBargeInName)
+        }
+        DropdownMenu(expanded = bargeModeExpanded, onDismissRequest = { bargeModeExpanded = false }) {
+            bargeInOptions.forEach { (mode, label) ->
+                DropdownMenuItem(text = { Text(label) }, onClick = {
+                    viewModel.setBargeInMode(mode)
+                    bargeModeExpanded = false
+                })
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = stringResource(id = R.string.speech_echo_cancellation))
+            Switch(
+                checked = settings.enableEchoCancellation,
+                onCheckedChange = { viewModel.setEchoCancellationEnabled(it) }
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = stringResource(id = R.string.speech_noise_suppression))
+            Switch(
+                checked = settings.enableNoiseSuppression,
+                onCheckedChange = { viewModel.setNoiseSuppressionEnabled(it) }
+            )
+        }
+
         Text(text = stringResource(id = R.string.tts_voice))
-        Button(onClick = { expanded = true }) {
+        Button(onClick = { voiceExpanded = true }) {
             Text(text = settings.ttsVoiceName.ifEmpty { stringResource(id = R.string.select) })
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded = voiceExpanded, onDismissRequest = { voiceExpanded = false }) {
             settings.ttsVoices.forEach { voice ->
                 DropdownMenuItem(text = { Text(voice.displayName) }, onClick = {
                     viewModel.setTtsVoice(voice.id, voice.displayName)
-                    expanded = false
+                    voiceExpanded = false
                 })
             }
         }

@@ -2,7 +2,6 @@
 
 import android.app.Application
 import android.net.Uri
-import android.speech.SpeechRecognizer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,6 +24,9 @@ import com.versementor.android.session.SessionStateType
 import com.versementor.android.session.SessionUiState
 import com.versementor.android.session.buildDefaultConfig
 import com.versementor.android.session.buildInitialSession
+import com.versementor.android.speech.AudioProcessingOptions
+import com.versementor.android.speech.BargeInMode
+import com.versementor.android.speech.DuplexPolicy
 import com.versementor.android.speech.SpeechIO
 import com.versementor.android.storage.PoemLineVariant
 import com.versementor.android.storage.PoemVariants
@@ -153,7 +155,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     )
                     return@launch
                 }
-                if (code == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                if (code == SpeechIO.ERROR_INSUFFICIENT_PERMISSIONS) {
                     transientRetryJob?.cancel()
                     transientRetryJob = null
                     consecutiveTransientAsrErrors = 0
@@ -215,7 +217,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (speaking) {
                     uiState = uiState.copy(
                         statusText = text(R.string.status_speaking),
-                        awaitingSpeech = false
+                        awaitingSpeech = if (settings.allowListeningDuringSpeaking) uiState.awaitingSpeech else false
                     )
                 } else if (pendingStartListening && uiState.sessionActive && !uiState.sessionPaused && !isManuallyPaused) {
                     pendingStartListening = false
@@ -233,6 +235,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         loadSettings()
+        refreshSpeechProviders()
         refreshVoices()
         uiState = uiState.copy(
             statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false)
@@ -309,10 +312,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     pendingStartListening = false
                     uiState = uiState.copy(
                         lastSpoken = action.text,
-                        awaitingSpeech = false,
+                        awaitingSpeech = if (settings.allowListeningDuringSpeaking) uiState.awaitingSpeech else false,
                         logs = appendLog("TTS: ${action.text}")
                     )
-                    speech.stopListening(reason = "before-tts-speak")
+                    if (!settings.allowListeningDuringSpeaking) {
+                        speech.stopListening(reason = "before-tts-speak")
+                    }
                     speech.speak(action.text, settings.ttsVoiceId)
                 }
 
@@ -326,7 +331,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                             awaitingSpeech = false,
                             sessionPaused = true
                         )
-                    } else if (isSpeaking) {
+                    } else if (isSpeaking && !settings.allowListeningDuringSpeaking) {
                         pendingStartListening = true
                     } else {
                         beginListening()
@@ -372,7 +377,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             uiState = uiState.copy(statusText = resolveStatusText(state.type, awaitingSpeech = false))
             return
         }
-        if (isSpeaking) {
+        if (isSpeaking && !settings.allowListeningDuringSpeaking) {
             pendingStartListening = true
         } else {
             pendingStartListening = false
@@ -450,7 +455,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 statusText = resolveStatusText(state.type, awaitingSpeech = false)
             )
         }
-        if (!uiState.sessionActive || uiState.sessionPaused || isManuallyPaused || isSpeaking) {
+        if (
+            !uiState.sessionActive ||
+            uiState.sessionPaused ||
+            isManuallyPaused ||
+            (isSpeaking && !settings.allowListeningDuringSpeaking)
+        ) {
             return
         }
         val retryDelayMs = when {
@@ -602,11 +612,18 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             )
         )
         settings = normalized
-        applyAsrTuningToSpeech(normalized)
+        applySpeechRuntimeConfig(normalized)
         if (normalized != loaded) {
             prefs.saveSettings(normalized)
         }
         syncStateConfig()
+    }
+
+    private fun refreshSpeechProviders() {
+        val options = speech.listSpeechProviders().map { provider ->
+            VoiceOption(id = provider.id, displayName = provider.displayName)
+        }
+        settings = settings.copy(speechProviders = options)
     }
 
     private fun refreshVoices() {
@@ -634,6 +651,47 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         settings = settings.copy(ttsVoiceId = id, ttsVoiceName = name)
         prefs.saveSettings(settings)
         syncStateConfig()
+    }
+
+    fun setSpeechProvider(id: String) {
+        if (id == settings.speechProviderId) return
+        settings = settings.copy(speechProviderId = id)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        refreshVoices()
+        uiState = uiState.copy(logs = appendLog("ASR debug: provider -> $id"))
+    }
+
+    fun setAllowListeningDuringSpeaking(enabled: Boolean) {
+        if (enabled == settings.allowListeningDuringSpeaking) return
+        settings = settings.copy(allowListeningDuringSpeaking = enabled)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("ASR debug: allowListeningDuringSpeaking -> $enabled"))
+    }
+
+    fun setBargeInMode(mode: String) {
+        if (mode == settings.bargeInMode) return
+        settings = settings.copy(bargeInMode = mode)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("ASR debug: bargeInMode -> $mode"))
+    }
+
+    fun setEchoCancellationEnabled(enabled: Boolean) {
+        if (enabled == settings.enableEchoCancellation) return
+        settings = settings.copy(enableEchoCancellation = enabled)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("ASR debug: echoCancellation -> $enabled"))
+    }
+
+    fun setNoiseSuppressionEnabled(enabled: Boolean) {
+        if (enabled == settings.enableNoiseSuppression) return
+        settings = settings.copy(enableNoiseSuppression = enabled)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("ASR debug: noiseSuppression -> $enabled"))
     }
 
     fun setAccentTolerance(
@@ -695,7 +753,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         if (normalized == settings.asrStopToStartCooldownMs) return
         settings = settings.copy(asrStopToStartCooldownMs = normalized)
         prefs.saveSettings(settings)
-        applyAsrTuningToSpeech()
+        applySpeechRuntimeConfig()
         uiState = uiState.copy(logs = appendLog("Debug: ASR stop-start cooldown -> ${normalized}ms"))
     }
 
@@ -711,7 +769,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             asrStopToStartCooldownMs = DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS
         )
         prefs.saveSettings(settings)
-        applyAsrTuningToSpeech()
+        applySpeechRuntimeConfig()
         uiState = uiState.copy(
             logs = appendLog(
                 "Debug: ASR tuning reset -> threshold=$DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD, delay=${DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS}ms, cooldown=${DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS}ms"
@@ -940,10 +998,10 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun isTransientAsrError(code: Int): Boolean {
-        return code == SpeechRecognizer.ERROR_AUDIO ||
-            code == SpeechRecognizer.ERROR_NO_MATCH ||
-            code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-            code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+        return code == SpeechIO.ERROR_AUDIO ||
+            code == SpeechIO.ERROR_NO_MATCH ||
+            code == SpeechIO.ERROR_SPEECH_TIMEOUT ||
+            code == SpeechIO.ERROR_RECOGNIZER_BUSY
     }
 
     private fun scheduleTransientAsrRetry(delayMs: Int = settings.transientAsrRetryDelayMs) {
@@ -963,7 +1021,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             if (!uiState.sessionActive || uiState.sessionPaused || isManuallyPaused) {
                 return@launch
             }
-            if (isSpeaking) {
+            if (isSpeaking && !settings.allowListeningDuringSpeaking) {
                 pendingStartListening = true
             } else {
                 beginListening()
@@ -975,8 +1033,19 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         return uiState.logs + line
     }
 
-    private fun applyAsrTuningToSpeech(source: SettingsState = settings) {
+    private fun applySpeechRuntimeConfig(source: SettingsState = settings) {
         speech.setStopToStartCooldownMs(source.asrStopToStartCooldownMs)
+        speech.setSpeechProvider(source.speechProviderId)
+        speech.setDuplexPolicy(
+            DuplexPolicy(
+                allowListeningDuringSpeaking = source.allowListeningDuringSpeaking,
+                bargeInMode = BargeInMode.fromRaw(source.bargeInMode),
+                audioProcessing = AudioProcessingOptions(
+                    echoCancellation = source.enableEchoCancellation,
+                    noiseSuppression = source.enableNoiseSuppression
+                )
+            )
+        )
     }
 
     private fun isAsrLogLine(line: String): Boolean {

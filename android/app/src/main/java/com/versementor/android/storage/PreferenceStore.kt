@@ -1,4 +1,4 @@
-﻿package com.versementor.android.storage
+package com.versementor.android.storage
 
 import android.content.Context
 import com.google.gson.Gson
@@ -14,6 +14,11 @@ class PreferenceStore(context: Context) {
         val followSystem = prefs.getBoolean("followSystem", true)
         val ttsVoiceId = prefs.getString("ttsVoiceId", "") ?: ""
         val ttsVoiceName = prefs.getString("ttsVoiceName", "") ?: ""
+        val speechProviderId = prefs.getString("speechProviderId", "iflytek") ?: "iflytek"
+        val allowListeningDuringSpeaking = prefs.getBoolean("allowListeningDuringSpeaking", true)
+        val bargeInMode = prefs.getString("bargeInMode", "stop_tts_on_speech") ?: "stop_tts_on_speech"
+        val enableEchoCancellation = prefs.getBoolean("enableEchoCancellation", true)
+        val enableNoiseSuppression = prefs.getBoolean("enableNoiseSuppression", true)
         val toneRemind = prefs.getBoolean("toneRemind", true)
         val variantsEnable = prefs.getBoolean("variantsEnable", true)
         val variantTtlDays = prefs.getInt("variantTtlDays", 7)
@@ -37,6 +42,11 @@ class PreferenceStore(context: Context) {
             followSystem = followSystem,
             ttsVoiceId = ttsVoiceId,
             ttsVoiceName = ttsVoiceName,
+            speechProviderId = speechProviderId,
+            allowListeningDuringSpeaking = allowListeningDuringSpeaking,
+            bargeInMode = bargeInMode,
+            enableEchoCancellation = enableEchoCancellation,
+            enableNoiseSuppression = enableNoiseSuppression,
             accentTolerance = accent,
             toneRemind = toneRemind,
             variantsEnable = variantsEnable,
@@ -54,6 +64,11 @@ class PreferenceStore(context: Context) {
             .putBoolean("followSystem", settings.followSystem)
             .putString("ttsVoiceId", settings.ttsVoiceId)
             .putString("ttsVoiceName", settings.ttsVoiceName)
+            .putString("speechProviderId", settings.speechProviderId)
+            .putBoolean("allowListeningDuringSpeaking", settings.allowListeningDuringSpeaking)
+            .putString("bargeInMode", settings.bargeInMode)
+            .putBoolean("enableEchoCancellation", settings.enableEchoCancellation)
+            .putBoolean("enableNoiseSuppression", settings.enableNoiseSuppression)
             .putBoolean("toneRemind", settings.toneRemind)
             .putBoolean("variantsEnable", settings.variantsEnable)
             .putInt("variantTtlDays", settings.variantTtlDays)

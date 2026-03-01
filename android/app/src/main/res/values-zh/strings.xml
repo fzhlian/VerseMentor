@@ -30,6 +30,14 @@
     <string name="language">语言</string>
     <string name="language_system">系统</string>
     <string name="language_zh">中文</string>
+    <string name="speech_provider">语音服务商</string>
+    <string name="speech_allow_listen_while_speaking">播报时保持监听</string>
+    <string name="speech_barge_mode">打断模式</string>
+    <string name="speech_barge_none">不打断</string>
+    <string name="speech_barge_duck">压低播报音量</string>
+    <string name="speech_barge_stop">检测到说话即停止播报</string>
+    <string name="speech_echo_cancellation">回声消除</string>
+    <string name="speech_noise_suppression">降噪</string>
     <string name="tts_voice">发音人</string>
     <string name="accent_tolerance">口音容错</string>
     <string name="tone_policy">声调策略</string>

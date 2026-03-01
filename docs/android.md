@@ -53,11 +53,13 @@ Notes:
 - TTS requires a Chinese voice installed on the device.
 - Release build now uses a fixed signing config in `android/app/build.gradle.kts`, defaulting to `android/keystore/versementor-release.jks` (alias/password values also defined there, overridable by Gradle properties). As long as this keystore remains unchanged, future upgrades will not hit signature-conflict install errors.
 - Home background image is loaded from `android/app/src/main/res/drawable/home_background.png` (current file synced from repo root `Background-no.png`).
-- ASR integration now suppresses expected client errors caused by app-initiated `stopListening()` and exposes ASR debug traces in session logs.
-- If `RECORD_AUDIO` permission is missing, ASR start is blocked before recognizer invocation, and session enters paused state with microphone-permission status text (no reducer error TTS loop).
-- If recognizer infrastructure is unavailable (`-2`) or start-listening fails (`-1`), session enters paused state with direct status text and logs (`ASR infrastructure error`), and does not dispatch reducer error prompts.
+- Android ASR no longer depends on `android.speech.SpeechRecognizer` / `RecognitionService`; the speech stack is provider-based (`iFlytek`, `Volcengine`) on top of platform mic capture (`AudioRecord`) and TTS playback.
+- Full-duplex arbitration is enabled by default (`allowListeningDuringSpeaking=true`) with configurable barge-in modes: `none`, `duck_tts`, `stop_tts_on_speech`.
+- Echo cancellation and noise suppression toggles are exposed in Settings and applied where platform audio effects are available.
+- For local end-to-end demo verification, the built-in provider adapters emit scripted final transcripts when speech segments are detected, so the full session flow can be validated without a vendor SDK binding.
+- If `RECORD_AUDIO` permission is missing, ASR start is blocked before microphone capture starts, and session enters paused state with microphone-permission status text.
 - ASR transient errors (`ERROR_NO_MATCH` / `ERROR_SPEECH_TIMEOUT` / `ERROR_RECOGNIZER_BUSY`) use delayed auto-retry. After N consecutive transient errors, reducer error prompt is emitted once, then transient counter resets.
-- Listening start path is idempotent at both `SessionViewModel.beginListening()` and `SpeechIO.startListening()`, so duplicate start triggers are ignored to reduce recognizer-busy churn.
+- Listening start path is idempotent at both `SessionViewModel.beginListening()` and `SpeechIO.startListening()`, so duplicate start triggers are ignored.
 - Settings page exposes ASR tuning parameters:
   - `ASR Retry Prompt Threshold`: range `1..10`, default `3`
   - `ASR Retry Delay (ms)`: range `100..2000`, default `350`

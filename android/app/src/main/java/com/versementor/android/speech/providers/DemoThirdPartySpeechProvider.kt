@@ -27,13 +27,27 @@ abstract class DemoThirdPartySpeechProvider(
     private val ttsPlayer = AndroidTtsPlayer(context)
     private val scriptCursor = AtomicInteger(0)
     private var listening = false
+    private var speaking = false
+    private var ignoreVadUntilMs = 0L
+    private var utteranceActive = false
+    private var utteranceSuppressed = false
+    private var utteranceStartAtMs = 0L
+    private var utteranceFrameCount = 0
     private var captureDrainJob: kotlinx.coroutines.Job? = null
+    private val ttsTailIgnoreMs = 420L
+    private val minAcceptedSpeechMs = 260L
+    private val minAcceptedSpeechFrames = 4
 
     init {
         ttsPlayer.onDebug = { message ->
             callbacks.onDebug("${descriptor.displayName} TTS: $message")
         }
         ttsPlayer.onSpeakingChanged = { speaking ->
+            this.speaking = speaking
+            if (!speaking) {
+                // Ignore short VAD bursts right after TTS ends to avoid self-triggered recognition.
+                ignoreVadUntilMs = System.currentTimeMillis() + ttsTailIgnoreMs
+            }
             callbacks.onSpeakingChanged(speaking)
         }
         ttsPlayer.onError = { code, message ->
@@ -66,22 +80,52 @@ abstract class DemoThirdPartySpeechProvider(
             nextObserver = object : AudioCaptureObserver {
                 override fun onVolume(level: Float) {
                     callbacks.onSpeechDetected(level)
+                    if (!utteranceActive || utteranceSuppressed) return
+                    utteranceFrameCount += 1
                 }
 
                 override fun onVad(state: VadState) {
                     if (state == VadState.SPEECH_START) {
+                        val now = System.currentTimeMillis()
+                        val suppressed = speaking || now < ignoreVadUntilMs
+                        utteranceActive = true
+                        utteranceSuppressed = suppressed
+                        utteranceStartAtMs = now
+                        utteranceFrameCount = 0
+                        if (suppressed) {
+                            callbacks.onDebug("${descriptor.displayName}: speech start ignored (tts-bleed)")
+                            return
+                        }
                         callbacks.onDebug("${descriptor.displayName}: speech start")
                         callbacks.onSpeechStart()
-                        if (!request.partialResults) return
-                        val preview = buildPreviewResult()
-                        if (preview.isNotBlank()) {
-                            callbacks.onAsrResult(preview, false, null)
-                        }
                         return
                     }
+                    if (!utteranceActive) {
+                        callbacks.onDebug("${descriptor.displayName}: speech end")
+                        callbacks.onSpeechEnd()
+                        return
+                    }
+                    val durationMs = (System.currentTimeMillis() - utteranceStartAtMs).coerceAtLeast(0L)
+                    val validUtterance =
+                        !utteranceSuppressed &&
+                            durationMs >= minAcceptedSpeechMs &&
+                            utteranceFrameCount >= minAcceptedSpeechFrames
+                    val ignoredByTts = utteranceSuppressed
+                    utteranceActive = false
+                    utteranceSuppressed = false
                     callbacks.onDebug("${descriptor.displayName}: speech end")
+                    if (ignoredByTts) {
+                        callbacks.onDebug("${descriptor.displayName}: speech end ignored (tts-bleed)")
+                        return
+                    }
                     callbacks.onSpeechEnd()
                     if (!listening) return
+                    if (!validUtterance) {
+                        callbacks.onDebug(
+                            "${descriptor.displayName}: speech rejected duration=${durationMs}ms frames=$utteranceFrameCount"
+                        )
+                        return
+                    }
                     listening = false
                     microphone.stop()
                     val text = nextTranscript()
@@ -95,6 +139,9 @@ abstract class DemoThirdPartySpeechProvider(
                 override fun onError(message: String) {
                     callbacks.onDebug("${descriptor.displayName}: mic error: $message")
                     listening = false
+                    utteranceActive = false
+                    utteranceSuppressed = false
+                    utteranceFrameCount = 0
                     callbacks.onAsrError(-1, message)
                 }
             }
@@ -127,6 +174,9 @@ abstract class DemoThirdPartySpeechProvider(
             return
         }
         listening = false
+        utteranceActive = false
+        utteranceSuppressed = false
+        utteranceFrameCount = 0
         captureDrainJob?.cancel()
         captureDrainJob = null
         microphone.stop()
@@ -183,6 +233,10 @@ abstract class DemoThirdPartySpeechProvider(
 
     override fun release() {
         listening = false
+        speaking = false
+        utteranceActive = false
+        utteranceSuppressed = false
+        utteranceFrameCount = 0
         captureDrainJob?.cancel()
         captureDrainJob = null
         microphone.release()

@@ -648,7 +648,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadSettings() {
         val loaded = prefs.loadSettings()
-        val normalized = loaded.copy(
+        val normalizedBase = loaded.copy(
             speechProviderId = SpeechProviderId.fromRaw(loaded.speechProviderId).rawValue,
             duckVolume = loaded.duckVolume.coerceIn(0f, 1f),
             transientAsrPromptThreshold = loaded.transientAsrPromptThreshold.coerceIn(
@@ -664,6 +664,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 MAX_ASR_STOP_TO_START_COOLDOWN_MS
             )
         )
+        val normalized = enforceProviderSpeechPolicy(normalizedBase)
         settings = normalized
         applySpeechRuntimeConfig(normalized)
         if (normalized != loaded) {
@@ -709,7 +710,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     fun setSpeechProvider(id: String) {
         val normalized = SpeechProviderId.fromRaw(id).rawValue
         if (normalized == settings.speechProviderId) return
-        settings = settings.copy(speechProviderId = normalized)
+        settings = enforceProviderSpeechPolicy(
+            settings.copy(speechProviderId = normalized)
+        )
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
         refreshVoices()
@@ -717,19 +720,32 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setAllowListeningDuringSpeaking(enabled: Boolean) {
-        if (enabled == settings.allowListeningDuringSpeaking) return
-        settings = settings.copy(allowListeningDuringSpeaking = enabled)
+        val requested = settings.copy(allowListeningDuringSpeaking = enabled)
+        val normalized = enforceProviderSpeechPolicy(requested)
+        if (normalized == settings) return
+        settings = normalized
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
-        uiState = uiState.copy(logs = appendLog("ASR debug: allowListeningDuringSpeaking -> $enabled"))
+        val policyNote = if (enabled && !settings.allowListeningDuringSpeaking) {
+            " (provider-forced=false)"
+        } else {
+            ""
+        }
+        uiState = uiState.copy(
+            logs = appendLog(
+                "ASR debug: allowListeningDuringSpeaking -> ${settings.allowListeningDuringSpeaking}$policyNote"
+            )
+        )
     }
 
     fun setBargeInMode(mode: String) {
-        if (mode == settings.bargeInMode) return
-        settings = settings.copy(bargeInMode = mode)
+        val requested = settings.copy(bargeInMode = mode)
+        val normalized = enforceProviderSpeechPolicy(requested)
+        if (normalized == settings) return
+        settings = normalized
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
-        uiState = uiState.copy(logs = appendLog("ASR debug: bargeInMode -> $mode"))
+        uiState = uiState.copy(logs = appendLog("ASR debug: bargeInMode -> ${settings.bargeInMode}"))
     }
 
     fun setDuckVolume(volume: Float) {
@@ -1182,17 +1198,41 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         return uiState.logs + line
     }
 
+    private fun providerSupportsDuplexListening(providerId: String): Boolean {
+        // Current providers are demo adapters; duplex listening during TTS causes self-triggered ASR.
+        return when (SpeechProviderId.fromRaw(providerId)) {
+            SpeechProviderId.IFLYTEK,
+            SpeechProviderId.VOLCENGINE -> false
+        }
+    }
+
+    private fun enforceProviderSpeechPolicy(source: SettingsState): SettingsState {
+        val provider = SpeechProviderId.fromRaw(source.speechProviderId).rawValue
+        if (providerSupportsDuplexListening(provider)) {
+            return source
+        }
+        var normalized = source
+        if (normalized.allowListeningDuringSpeaking) {
+            normalized = normalized.copy(allowListeningDuringSpeaking = false)
+        }
+        if (BargeInMode.fromRaw(normalized.bargeInMode) != BargeInMode.NONE) {
+            normalized = normalized.copy(bargeInMode = BargeInMode.NONE.rawValue)
+        }
+        return normalized
+    }
+
     private fun applySpeechRuntimeConfig(source: SettingsState = settings) {
-        speech.setStopToStartCooldownMs(source.asrStopToStartCooldownMs)
-        speech.setSpeechProvider(source.speechProviderId)
+        val normalized = enforceProviderSpeechPolicy(source)
+        speech.setStopToStartCooldownMs(normalized.asrStopToStartCooldownMs)
+        speech.setSpeechProvider(normalized.speechProviderId)
         speech.setDuplexPolicy(
             DuplexPolicy(
-                allowListeningDuringSpeaking = source.allowListeningDuringSpeaking,
-                bargeInMode = BargeInMode.fromRaw(source.bargeInMode),
-                duckVolume = source.duckVolume.coerceIn(0f, 1f),
+                allowListeningDuringSpeaking = normalized.allowListeningDuringSpeaking,
+                bargeInMode = BargeInMode.fromRaw(normalized.bargeInMode),
+                duckVolume = normalized.duckVolume.coerceIn(0f, 1f),
                 audioProcessing = AudioProcessingOptions(
-                    echoCancellation = source.enableEchoCancellation,
-                    noiseSuppression = source.enableNoiseSuppression
+                    echoCancellation = normalized.enableEchoCancellation,
+                    noiseSuppression = normalized.enableNoiseSuppression
                 )
             )
         )

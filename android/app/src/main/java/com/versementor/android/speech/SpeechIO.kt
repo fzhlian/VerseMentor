@@ -80,8 +80,8 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private val bargeInMinIntervalMs = 500L
     private val arbiter = FullDuplexAudioArbiter(
         DuplexPolicy(
-            allowListeningDuringSpeaking = true,
-            bargeInMode = BargeInMode.DUCK_TTS,
+            allowListeningDuringSpeaking = false,
+            bargeInMode = BargeInMode.NONE,
             audioProcessing = AudioProcessingOptions(
                 echoCancellation = true,
                 noiseSuppression = true

@@ -38,8 +38,8 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.4.11"
+        versionCode = 16
+        versionName = "0.4.12"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
     }

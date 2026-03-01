@@ -17,7 +17,7 @@ data class SettingsState(
     val ttsVoiceId: String = "",
     val ttsVoiceName: String = "",
     val speechProviderId: String = "iflytek",
-    val allowListeningDuringSpeaking: Boolean = true,
+    val allowListeningDuringSpeaking: Boolean = false,
     val bargeInMode: String = "duck_tts",
     val duckVolume: Float = 0.25f,
     val enableEchoCancellation: Boolean = true,

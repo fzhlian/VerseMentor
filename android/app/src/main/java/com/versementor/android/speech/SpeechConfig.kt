@@ -34,7 +34,7 @@ data class AudioProcessingOptions(
 )
 
 data class DuplexPolicy(
-    val allowListeningDuringSpeaking: Boolean = true,
+    val allowListeningDuringSpeaking: Boolean = false,
     val bargeInMode: BargeInMode = BargeInMode.DUCK_TTS,
     val duckVolume: Float = 0.25f,
     val audioProcessing: AudioProcessingOptions = AudioProcessingOptions()

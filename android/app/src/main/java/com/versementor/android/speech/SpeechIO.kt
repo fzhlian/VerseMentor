@@ -47,7 +47,8 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         private const val STOP_COMPLETION_TIMEOUT_BUFFER_MS = 320L
         private const val MIN_STOP_COMPLETION_TIMEOUT_MS = 450L
         private const val MAX_STOP_COMPLETION_TIMEOUT_MS = 1800L
-        private const val LISTENING_STALE_TIMEOUT_MS = 6500L
+        private const val LISTENING_STALE_TIMEOUT_MS = 9000L
+        private const val STALE_TIMEOUT_INFRA_ERROR_THRESHOLD = 2
         private const val MAIN_THREAD_WAIT_MS = 1200L
     }
 
@@ -74,6 +75,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var stopToStartCooldownMs = DEFAULT_STOP_TO_START_COOLDOWN_MS
     private var stopCompletionTimeoutRunnable: Runnable? = null
     private var listeningStaleTimeoutRunnable: Runnable? = null
+    private var consecutiveListeningStaleTimeouts = 0
     private var suppressNextClientError = false
     private var isReleased = false
     override var onAsrResult: ((String, Boolean, Float?) -> Unit)? = null
@@ -102,9 +104,9 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             }
             override fun onError(error: Int) {
                 if (isReleased) return
-                touchRecognizerCallbackClock()
                 val shouldSuppressClientError =
                     error == SpeechRecognizer.ERROR_CLIENT && suppressNextClientError
+                touchRecognizerCallbackClock(resetStaleTimeoutCounter = !shouldSuppressClientError)
                 forceResetAsrState()
                 if (shouldSuppressClientError) {
                     onAsrDebug?.invoke("ASR expected client error suppressed")
@@ -287,6 +289,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             suppressNextClientError = true
             isStopping = true
             lastStopRequestAtMs = System.currentTimeMillis()
+            consecutiveListeningStaleTimeouts = 0
             onAsrDebug?.invoke("ASR stopListening by app")
             cancelPendingListeningStaleTimeout()
             scheduleStopCompletionTimeout()
@@ -343,6 +346,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             isListening = false
             isStopping = false
             suppressNextClientError = true
+            consecutiveListeningStaleTimeouts = 0
             cancelPendingListeningStaleTimeout()
             cancelPendingStopCompletionTimeout()
             val recognizer = speechRecognizer
@@ -451,10 +455,20 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             onAsrDebug?.invoke("ASR listening timeout ${elapsed}ms -> cancel and emit speech timeout")
             safeCancelRecognizer("listening-timeout", suppressClientError = true)
             forceResetAsrState()
-            onAsrError?.invoke(
-                SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-                mapAsrError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
-            )
+            consecutiveListeningStaleTimeouts += 1
+            val staleCount = consecutiveListeningStaleTimeouts
+            if (staleCount >= STALE_TIMEOUT_INFRA_ERROR_THRESHOLD) {
+                val reason = context.getString(R.string.asr_error_start_listening_failed)
+                onAsrDebug?.invoke(
+                    "ASR listening timeout staleCount=$staleCount -> escalate infrastructure error"
+                )
+                onAsrError?.invoke(ERROR_START_LISTENING_FAILED, reason)
+            } else {
+                onAsrError?.invoke(
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
+                    mapAsrError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                )
+            }
         }
         listeningStaleTimeoutRunnable = runnable
         mainHandler.postDelayed(runnable, LISTENING_STALE_TIMEOUT_MS)
@@ -483,8 +497,11 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         lastRecognizerCallbackAtMs = 0L
     }
 
-    private fun touchRecognizerCallbackClock() {
+    private fun touchRecognizerCallbackClock(resetStaleTimeoutCounter: Boolean = true) {
         lastRecognizerCallbackAtMs = System.currentTimeMillis()
+        if (resetStaleTimeoutCounter) {
+            consecutiveListeningStaleTimeouts = 0
+        }
         if (isListening && !isStopping && lastStartRequestAtMs > 0L) {
             scheduleListeningStaleTimeout(anchorStartAtMs = lastStartRequestAtMs)
         }

@@ -35,8 +35,6 @@ abstract class DemoThirdPartySpeechProvider(
     private var utteranceFrameCount = 0
     private var captureDrainJob: kotlinx.coroutines.Job? = null
     private val ttsTailIgnoreMs = 420L
-    private val minAcceptedSpeechMs = 260L
-    private val minAcceptedSpeechFrames = 4
 
     init {
         ttsPlayer.onDebug = { message ->
@@ -67,6 +65,11 @@ abstract class DemoThirdPartySpeechProvider(
             return false
         }
         val frameMs = if (request.frameMs == 40) 40 else 20
+        val minAcceptedSpeechMs = request.utterancePolicy.minAcceptedSpeechMs.coerceIn(120, 1200).toLong()
+        val minAcceptedSpeechFrames = request.utterancePolicy.minAcceptedSpeechFrames.coerceIn(2, 40)
+        val shortSpeechAcceptFrames = request.utterancePolicy.shortSpeechAcceptFrames
+            .coerceIn(2, 40)
+            .coerceAtLeast(minAcceptedSpeechFrames)
         val stream = microphone.start(
             config = AudioCaptureConfig(
                 sampleRateHz = 16000,
@@ -106,10 +109,14 @@ abstract class DemoThirdPartySpeechProvider(
                         return
                     }
                     val durationMs = (System.currentTimeMillis() - utteranceStartAtMs).coerceAtLeast(0L)
+                    val acceptedByDuration = durationMs >= minAcceptedSpeechMs
+                    val acceptedByFrames =
+                        durationMs < minAcceptedSpeechMs &&
+                            utteranceFrameCount >= shortSpeechAcceptFrames
                     val validUtterance =
                         !utteranceSuppressed &&
-                            durationMs >= minAcceptedSpeechMs &&
-                            utteranceFrameCount >= minAcceptedSpeechFrames
+                            utteranceFrameCount >= minAcceptedSpeechFrames &&
+                            (acceptedByDuration || acceptedByFrames)
                     val ignoredByTts = utteranceSuppressed
                     utteranceActive = false
                     utteranceSuppressed = false
@@ -125,6 +132,11 @@ abstract class DemoThirdPartySpeechProvider(
                             "${descriptor.displayName}: speech rejected duration=${durationMs}ms frames=$utteranceFrameCount"
                         )
                         return
+                    }
+                    if (acceptedByFrames) {
+                        callbacks.onDebug(
+                            "${descriptor.displayName}: short speech accepted duration=${durationMs}ms frames=$utteranceFrameCount"
+                        )
                     }
                     listening = false
                     microphone.stop()
@@ -163,7 +175,7 @@ abstract class DemoThirdPartySpeechProvider(
 
         callbacks.onAsrReady()
         callbacks.onDebug(
-            "${descriptor.displayName}: listening locale=${request.locale} partial=${request.partialResults} ec=${request.audioProcessing.echoCancellation} ns=${request.audioProcessing.noiseSuppression} frameMs=$frameMs"
+            "${descriptor.displayName}: listening locale=${request.locale} partial=${request.partialResults} ec=${request.audioProcessing.echoCancellation} ns=${request.audioProcessing.noiseSuppression} frameMs=$frameMs minMs=$minAcceptedSpeechMs minFrames=$minAcceptedSpeechFrames shortFrames=$shortSpeechAcceptFrames"
         )
         return true
     }

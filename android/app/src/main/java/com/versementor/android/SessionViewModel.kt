@@ -26,6 +26,7 @@ import com.versementor.android.session.SessionStateType
 import com.versementor.android.session.SessionUiState
 import com.versementor.android.session.buildDefaultConfig
 import com.versementor.android.session.buildInitialSession
+import com.versementor.android.speech.AsrUtterancePolicy
 import com.versementor.android.speech.AudioProcessingOptions
 import com.versementor.android.speech.BargeInMode
 import com.versementor.android.speech.DuplexPolicy
@@ -42,6 +43,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 class SessionViewModel(app: Application) : AndroidViewModel(app) {
@@ -57,6 +61,15 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         const val MAX_TRANSIENT_ASR_RETRY_DELAY_MS = 2000
         const val MIN_ASR_STOP_TO_START_COOLDOWN_MS = 80
         const val MAX_ASR_STOP_TO_START_COOLDOWN_MS = 1200
+        const val DEFAULT_ASR_MIN_ACCEPTED_SPEECH_MS = 260
+        const val MIN_ASR_MIN_ACCEPTED_SPEECH_MS = 120
+        const val MAX_ASR_MIN_ACCEPTED_SPEECH_MS = 1200
+        const val DEFAULT_ASR_MIN_ACCEPTED_SPEECH_FRAMES = 4
+        const val MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES = 2
+        const val MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES = 40
+        const val DEFAULT_ASR_SHORT_SPEECH_ACCEPT_FRAMES = 10
+        const val MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES = 4
+        const val MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES = 40
         private const val MAX_VARIANTS_PER_LINE = 4
         private const val START_NOT_READY_LOG_EVERY = 4
         private const val START_NOT_READY_FORCE_STOP_THRESHOLD = 8
@@ -66,6 +79,14 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         private const val NETWORK_TRANSIENT_PROMPT_THRESHOLD = 5
         private const val NETWORK_RETRY_MIN_DELAY_MS = 650
         private const val NETWORK_RETRY_STEP_DELAY_MS = 180
+        private const val WEAK_NETWORK_MODE_DURATION_MS = 75_000L
+        private const val WEAK_NETWORK_RETRY_FLOOR_MS = 900
+        private const val WEAK_NETWORK_COOLDOWN_FLOOR_MS = 360
+        private const val LOCAL_SILENCE_MODE_DURATION_MS = 45_000L
+        private const val LOCAL_SILENCE_DEGRADE_THRESHOLD = 2
+        private const val LOCAL_SILENCE_RETRY_FLOOR_MS = 520
+        private const val LOCAL_SILENCE_COOLDOWN_FLOOR_MS = 320
+        private const val RETRY_BACKOFF_MAX_STEPS = 6
         private const val ASR_LOG_TAG = "VerseMentorASR"
     }
 
@@ -86,6 +107,10 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private var consecutiveNetworkAsrErrors = 0
     private var lastNetworkFallbackAtMs = 0L
     private var consecutiveStartNotReady = 0
+    private var transientRetryStreak = 0
+    private var localSilenceStreak = 0
+    private var weakNetworkModeUntilMs = 0L
+    private var localSilenceModeUntilMs = 0L
     private var transientRetryJob: Job? = null
 
     var uiState: SessionUiState by mutableStateOf(SessionUiState())
@@ -129,7 +154,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 consecutiveNetworkAsrErrors = 0
                 lastNetworkFallbackAtMs = 0L
                 consecutiveStartNotReady = 0
+                transientRetryStreak = 0
                 val heard = text.trim()
+                if (isFinal && heard.isNotEmpty()) {
+                    localSilenceStreak = 0
+                    clearRuntimeDegradeMode(reason = "asr-result")
+                }
                 val nextRecognizedLines = if (isFinal && heard.isNotEmpty() && uiState.recognizedLines.lastOrNull() != heard) {
                     uiState.recognizedLines + heard
                 } else {
@@ -157,6 +187,20 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     consecutiveNetworkAsrErrors = 0
                 }
+                val isLocalSilenceTimeout =
+                    code == SpeechIO.ERROR_SPEECH_TIMEOUT &&
+                        message.contains("local-silence", ignoreCase = true)
+                if (isLocalSilenceTimeout) {
+                    localSilenceStreak += 1
+                    if (localSilenceStreak >= LOCAL_SILENCE_DEGRADE_THRESHOLD) {
+                        enterLocalSilenceMode("local-silence-x$localSilenceStreak")
+                    }
+                } else if (code != SpeechIO.ERROR_SPEECH_TIMEOUT) {
+                    localSilenceStreak = 0
+                }
+                if (networkError && consecutiveNetworkAsrErrors >= NETWORK_ERROR_PROVIDER_FALLBACK_THRESHOLD) {
+                    enterWeakNetworkMode("network-x$consecutiveNetworkAsrErrors")
+                }
                 if (
                     code == SpeechIO.ERROR_SERVICE_UNAVAILABLE ||
                     code == SpeechIO.ERROR_START_LISTENING_FAILED
@@ -166,6 +210,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     consecutiveTransientAsrErrors = 0
                     consecutiveNetworkAsrErrors = 0
                     lastNetworkFallbackAtMs = 0L
+                    transientRetryStreak = 0
                     pendingStartListening = false
                     isManuallyPaused = true
                     speech.stopListening(reason = "asr-error-infra")
@@ -183,6 +228,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     consecutiveTransientAsrErrors = 0
                     consecutiveNetworkAsrErrors = 0
                     lastNetworkFallbackAtMs = 0L
+                    transientRetryStreak = 0
                     pendingStartListening = false
                     isManuallyPaused = true
                     speech.stopListening(reason = "asr-error-permission")
@@ -199,18 +245,18 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (isTransientAsrError(code, message)) {
                     consecutiveTransientAsrErrors += 1
+                    transientRetryStreak += 1
                     pendingStartListening = false
                     val promptThreshold = if (networkError) {
                         settings.transientAsrPromptThreshold.coerceAtLeast(NETWORK_TRANSIENT_PROMPT_THRESHOLD)
                     } else {
                         settings.transientAsrPromptThreshold
                     }
-                    val retryDelayMs = if (networkError) {
-                        (settings.transientAsrRetryDelayMs + (consecutiveNetworkAsrErrors * NETWORK_RETRY_STEP_DELAY_MS))
-                            .coerceIn(NETWORK_RETRY_MIN_DELAY_MS, MAX_TRANSIENT_ASR_RETRY_DELAY_MS)
-                    } else {
-                        settings.transientAsrRetryDelayMs
-                    }
+                    val retryDelayMs = computeAdaptiveRetryDelayMs(
+                        networkError = networkError,
+                        transientStreak = transientRetryStreak,
+                        baseDelayMs = settings.transientAsrRetryDelayMs
+                    )
                     uiState = uiState.copy(
                         awaitingSpeech = false,
                         logs = appendLog(
@@ -225,6 +271,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                         transientRetryJob?.cancel()
                         transientRetryJob = null
                         consecutiveTransientAsrErrors = 0
+                        transientRetryStreak = 0
                         dispatch(SessionEvent.UserAsrError(code, message))
                         return@launch
                     }
@@ -236,6 +283,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 consecutiveTransientAsrErrors = 0
                 consecutiveNetworkAsrErrors = 0
                 lastNetworkFallbackAtMs = 0L
+                transientRetryStreak = 0
                 pendingStartListening = false
                 uiState = uiState.copy(
                     awaitingSpeech = false,
@@ -291,7 +339,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 delay(1000)
                 if (uiState.sessionActive && !uiState.sessionPaused) {
-                    dispatch(SessionEvent.Tick(System.currentTimeMillis()))
+                    val now = System.currentTimeMillis()
+                    maybeRefreshRuntimeModes(now)
+                    dispatch(SessionEvent.Tick(now))
                 }
             }
         }
@@ -328,6 +378,10 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         consecutiveNetworkAsrErrors = 0
         lastNetworkFallbackAtMs = 0L
         consecutiveStartNotReady = 0
+        transientRetryStreak = 0
+        localSilenceStreak = 0
+        weakNetworkModeUntilMs = 0L
+        localSilenceModeUntilMs = 0L
         transientRetryJob?.cancel()
         transientRetryJob = null
         uiState = SessionUiState(
@@ -442,6 +496,10 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         consecutiveNetworkAsrErrors = 0
         lastNetworkFallbackAtMs = 0L
         consecutiveStartNotReady = 0
+        transientRetryStreak = 0
+        localSilenceStreak = 0
+        weakNetworkModeUntilMs = 0L
+        localSilenceModeUntilMs = 0L
         transientRetryJob?.cancel()
         transientRetryJob = null
         speech.stopListening(reason = "stop-session")
@@ -464,6 +522,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val started = speech.startListening()
         if (started) {
             consecutiveStartNotReady = 0
+            transientRetryStreak = 0
             uiState = uiState.copy(
                 statusText = text(R.string.waiting_input),
                 awaitingSpeech = true,
@@ -475,9 +534,11 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             // startListening already emitted a concrete ASR error (infra/permission/etc.),
             // so this is not a "not ready" case and should not enter retry/backoff logs.
             consecutiveStartNotReady = 0
+            transientRetryStreak = 0
             return
         }
         consecutiveStartNotReady += 1
+        transientRetryStreak += 1
         val retryCount = consecutiveStartNotReady
         val shouldForceStop = retryCount >= START_NOT_READY_FORCE_STOP_THRESHOLD
         if (shouldForceStop) {
@@ -516,8 +577,16 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         }
         val retryDelayMs = when {
             shouldForceStop -> START_NOT_READY_BACKOFF_DELAY_MS
-            retryCount >= START_NOT_READY_LOG_EVERY -> settings.transientAsrRetryDelayMs.coerceAtLeast(350)
-            else -> settings.transientAsrRetryDelayMs.coerceAtMost(200)
+            retryCount >= START_NOT_READY_LOG_EVERY -> computeAdaptiveRetryDelayMs(
+                networkError = false,
+                transientStreak = transientRetryStreak,
+                baseDelayMs = settings.transientAsrRetryDelayMs.coerceAtLeast(350)
+            )
+            else -> computeAdaptiveRetryDelayMs(
+                networkError = false,
+                transientStreak = transientRetryStreak,
+                baseDelayMs = settings.transientAsrRetryDelayMs.coerceAtMost(200)
+            )
         }
         scheduleTransientAsrRetry(
             delayMs = retryDelayMs
@@ -648,6 +717,14 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadSettings() {
         val loaded = prefs.loadSettings()
+        val normalizedMinFrames = loaded.asrMinAcceptedSpeechFrames.coerceIn(
+            MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
+            MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
+        )
+        val normalizedShortFrames = loaded.asrShortSpeechAcceptFrames.coerceIn(
+            MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES,
+            MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+        ).coerceAtLeast(normalizedMinFrames)
         val normalizedBase = loaded.copy(
             speechProviderId = SpeechProviderId.fromRaw(loaded.speechProviderId).rawValue,
             duckVolume = loaded.duckVolume.coerceIn(0f, 1f),
@@ -662,7 +739,13 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             asrStopToStartCooldownMs = loaded.asrStopToStartCooldownMs.coerceIn(
                 MIN_ASR_STOP_TO_START_COOLDOWN_MS,
                 MAX_ASR_STOP_TO_START_COOLDOWN_MS
-            )
+            ),
+            asrMinAcceptedSpeechMs = loaded.asrMinAcceptedSpeechMs.coerceIn(
+                MIN_ASR_MIN_ACCEPTED_SPEECH_MS,
+                MAX_ASR_MIN_ACCEPTED_SPEECH_MS
+            ),
+            asrMinAcceptedSpeechFrames = normalizedMinFrames,
+            asrShortSpeechAcceptFrames = normalizedShortFrames
         )
         val normalized = enforceProviderSpeechPolicy(normalizedBase)
         settings = normalized
@@ -726,8 +809,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         settings = normalized
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
-        val policyNote = if (enabled && !settings.allowListeningDuringSpeaking) {
-            " (provider-forced=false)"
+        val runtimeApplied = applyRuntimeSpeechPolicy(settings)
+        val policyNote = if (enabled && !runtimeApplied.allowListeningDuringSpeaking) {
+            " (runtime-forced=false)"
         } else {
             ""
         }
@@ -836,22 +920,73 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         uiState = uiState.copy(logs = appendLog("Debug: ASR stop-start cooldown -> ${normalized}ms"))
     }
 
+    fun setAsrMinAcceptedSpeechMs(durationMs: Int) {
+        val normalized = durationMs.coerceIn(
+            MIN_ASR_MIN_ACCEPTED_SPEECH_MS,
+            MAX_ASR_MIN_ACCEPTED_SPEECH_MS
+        )
+        if (normalized == settings.asrMinAcceptedSpeechMs) return
+        settings = settings.copy(asrMinAcceptedSpeechMs = normalized)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("Debug: ASR min accepted speech -> ${normalized}ms"))
+    }
+
+    fun setAsrMinAcceptedSpeechFrames(frames: Int) {
+        val normalized = frames.coerceIn(
+            MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
+            MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
+        )
+        val linkedShortFrames = settings.asrShortSpeechAcceptFrames.coerceAtLeast(normalized)
+        if (
+            normalized == settings.asrMinAcceptedSpeechFrames &&
+            linkedShortFrames == settings.asrShortSpeechAcceptFrames
+        ) return
+        settings = settings.copy(
+            asrMinAcceptedSpeechFrames = normalized,
+            asrShortSpeechAcceptFrames = linkedShortFrames
+        )
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(
+            logs = appendLog("Debug: ASR min accepted speech frames -> $normalized (shortFrames=$linkedShortFrames)")
+        )
+    }
+
+    fun setAsrShortSpeechAcceptFrames(frames: Int) {
+        val normalized = frames.coerceIn(
+            MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES,
+            MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+        ).coerceAtLeast(settings.asrMinAcceptedSpeechFrames)
+        if (normalized == settings.asrShortSpeechAcceptFrames) return
+        settings = settings.copy(asrShortSpeechAcceptFrames = normalized)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("Debug: ASR short speech accept frames -> $normalized"))
+    }
+
     fun resetTransientAsrTuning() {
         if (
             settings.transientAsrPromptThreshold == DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD &&
             settings.transientAsrRetryDelayMs == DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS &&
-            settings.asrStopToStartCooldownMs == DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS
+            settings.asrStopToStartCooldownMs == DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS &&
+            settings.asrMinAcceptedSpeechMs == DEFAULT_ASR_MIN_ACCEPTED_SPEECH_MS &&
+            settings.asrMinAcceptedSpeechFrames == DEFAULT_ASR_MIN_ACCEPTED_SPEECH_FRAMES &&
+            settings.asrShortSpeechAcceptFrames == DEFAULT_ASR_SHORT_SPEECH_ACCEPT_FRAMES
         ) return
         settings = settings.copy(
             transientAsrPromptThreshold = DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD,
             transientAsrRetryDelayMs = DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS,
-            asrStopToStartCooldownMs = DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS
+            asrStopToStartCooldownMs = DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS,
+            asrMinAcceptedSpeechMs = DEFAULT_ASR_MIN_ACCEPTED_SPEECH_MS,
+            asrMinAcceptedSpeechFrames = DEFAULT_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
+            asrShortSpeechAcceptFrames = DEFAULT_ASR_SHORT_SPEECH_ACCEPT_FRAMES
         )
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
         uiState = uiState.copy(
             logs = appendLog(
-                "Debug: ASR tuning reset -> threshold=$DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD, delay=${DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS}ms, cooldown=${DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS}ms"
+                "Debug: ASR tuning reset -> threshold=$DEFAULT_TRANSIENT_ASR_PROMPT_THRESHOLD, delay=${DEFAULT_TRANSIENT_ASR_RETRY_DELAY_MS}ms, cooldown=${DEFAULT_ASR_STOP_TO_START_COOLDOWN_MS}ms, minSpeech=${DEFAULT_ASR_MIN_ACCEPTED_SPEECH_MS}ms, minFrames=$DEFAULT_ASR_MIN_ACCEPTED_SPEECH_FRAMES, shortFrames=$DEFAULT_ASR_SHORT_SPEECH_ACCEPT_FRAMES"
             )
         )
     }
@@ -1155,6 +1290,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         lastNetworkFallbackAtMs = now
         consecutiveNetworkAsrErrors = 0
         consecutiveTransientAsrErrors = 0
+        transientRetryStreak = 0
         pendingStartListening = false
         uiState = uiState.copy(
             awaitingSpeech = false,
@@ -1171,10 +1307,17 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun scheduleTransientAsrRetry(delayMs: Int = settings.transientAsrRetryDelayMs) {
         transientRetryJob?.cancel()
-        val baseDelayMs = delayMs.coerceIn(
+        var baseDelayMs = delayMs.coerceIn(
             MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
             MAX_TRANSIENT_ASR_RETRY_DELAY_MS
         )
+        val now = System.currentTimeMillis()
+        if (isWeakNetworkModeActive(now)) {
+            baseDelayMs = max(baseDelayMs, WEAK_NETWORK_RETRY_FLOOR_MS)
+        }
+        if (isLocalSilenceModeActive(now)) {
+            baseDelayMs = max(baseDelayMs, LOCAL_SILENCE_RETRY_FLOOR_MS)
+        }
         val jitterBound = (baseDelayMs / 4).coerceIn(40, 250)
         val jitter = Random.nextInt(from = -jitterBound, until = jitterBound + 1)
         val actualDelayMs = (baseDelayMs + jitter).coerceIn(
@@ -1194,15 +1337,110 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun computeAdaptiveRetryDelayMs(
+        networkError: Boolean,
+        transientStreak: Int,
+        baseDelayMs: Int
+    ): Int {
+        val normalizedBase = baseDelayMs.coerceIn(
+            MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+            MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+        )
+        val steps = (transientStreak - 1).coerceAtLeast(0).coerceAtMost(RETRY_BACKOFF_MAX_STEPS)
+        val multiplier = 1.35.pow(steps.toDouble())
+        var delay = (normalizedBase * multiplier).roundToInt()
+        if (networkError) {
+            delay += consecutiveNetworkAsrErrors * NETWORK_RETRY_STEP_DELAY_MS
+        }
+        val now = System.currentTimeMillis()
+        if (networkError || isWeakNetworkModeActive(now)) {
+            delay = max(delay, NETWORK_RETRY_MIN_DELAY_MS)
+            delay = max(delay, WEAK_NETWORK_RETRY_FLOOR_MS)
+        }
+        if (isLocalSilenceModeActive(now)) {
+            delay = max(delay, LOCAL_SILENCE_RETRY_FLOOR_MS)
+        }
+        return delay.coerceIn(
+            MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
+            MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+        )
+    }
+
+    private fun maybeRefreshRuntimeModes(now: Long) {
+        var updated = false
+        if (weakNetworkModeUntilMs > 0L && now >= weakNetworkModeUntilMs) {
+            weakNetworkModeUntilMs = 0L
+            uiState = uiState.copy(logs = appendLog("ASR runtime: weak-network mode cleared"))
+            updated = true
+        }
+        if (localSilenceModeUntilMs > 0L && now >= localSilenceModeUntilMs) {
+            localSilenceModeUntilMs = 0L
+            localSilenceStreak = 0
+            uiState = uiState.copy(logs = appendLog("ASR runtime: local-silence mode cleared"))
+            updated = true
+        }
+        if (updated) {
+            applySpeechRuntimeConfig()
+        }
+    }
+
+    private fun enterWeakNetworkMode(reason: String) {
+        val now = System.currentTimeMillis()
+        val nextUntil = now + WEAK_NETWORK_MODE_DURATION_MS
+        val wasActive = isWeakNetworkModeActive(now)
+        weakNetworkModeUntilMs = max(weakNetworkModeUntilMs, nextUntil)
+        if (!wasActive) {
+            uiState = uiState.copy(
+                logs = appendLog("ASR runtime: weak-network mode on (${reason})")
+            )
+        }
+        applySpeechRuntimeConfig()
+    }
+
+    private fun enterLocalSilenceMode(reason: String) {
+        val now = System.currentTimeMillis()
+        val nextUntil = now + LOCAL_SILENCE_MODE_DURATION_MS
+        val wasActive = isLocalSilenceModeActive(now)
+        localSilenceModeUntilMs = max(localSilenceModeUntilMs, nextUntil)
+        if (!wasActive) {
+            uiState = uiState.copy(
+                logs = appendLog("ASR runtime: local-silence mode on (${reason})")
+            )
+        }
+        applySpeechRuntimeConfig()
+    }
+
+    private fun clearRuntimeDegradeMode(reason: String) {
+        var changed = false
+        if (weakNetworkModeUntilMs > 0L) {
+            weakNetworkModeUntilMs = 0L
+            changed = true
+        }
+        if (localSilenceModeUntilMs > 0L) {
+            localSilenceModeUntilMs = 0L
+            changed = true
+        }
+        if (!changed) return
+        uiState = uiState.copy(logs = appendLog("ASR runtime: degrade cleared (${reason})"))
+        applySpeechRuntimeConfig()
+    }
+
+    private fun isWeakNetworkModeActive(now: Long = System.currentTimeMillis()): Boolean {
+        return weakNetworkModeUntilMs > now
+    }
+
+    private fun isLocalSilenceModeActive(now: Long = System.currentTimeMillis()): Boolean {
+        return localSilenceModeUntilMs > now
+    }
+
     private fun appendLog(line: String): List<String> {
         return uiState.logs + line
     }
 
     private fun providerSupportsDuplexListening(providerId: String): Boolean {
-        // Current providers are demo adapters; duplex listening during TTS causes self-triggered ASR.
         return when (SpeechProviderId.fromRaw(providerId)) {
             SpeechProviderId.IFLYTEK,
-            SpeechProviderId.VOLCENGINE -> false
+            SpeechProviderId.VOLCENGINE -> true
         }
     }
 
@@ -1221,9 +1459,40 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         return normalized
     }
 
+    private fun applyRuntimeSpeechPolicy(source: SettingsState): SettingsState {
+        var normalized = source
+        val now = System.currentTimeMillis()
+        if (isWeakNetworkModeActive(now)) {
+            normalized = normalized.copy(
+                allowListeningDuringSpeaking = false,
+                bargeInMode = BargeInMode.NONE.rawValue,
+                enableEchoCancellation = true,
+                enableNoiseSuppression = true,
+                asrStopToStartCooldownMs = max(normalized.asrStopToStartCooldownMs, WEAK_NETWORK_COOLDOWN_FLOOR_MS)
+            )
+        }
+        if (isLocalSilenceModeActive(now)) {
+            normalized = normalized.copy(
+                allowListeningDuringSpeaking = false,
+                bargeInMode = BargeInMode.NONE.rawValue,
+                asrStopToStartCooldownMs = max(normalized.asrStopToStartCooldownMs, LOCAL_SILENCE_COOLDOWN_FLOOR_MS)
+            )
+        }
+        return normalized
+    }
+
     private fun applySpeechRuntimeConfig(source: SettingsState = settings) {
-        val normalized = enforceProviderSpeechPolicy(source)
+        val normalized = applyRuntimeSpeechPolicy(
+            enforceProviderSpeechPolicy(source)
+        )
         speech.setStopToStartCooldownMs(normalized.asrStopToStartCooldownMs)
+        speech.setAsrUtterancePolicy(
+            AsrUtterancePolicy(
+                minAcceptedSpeechMs = normalized.asrMinAcceptedSpeechMs,
+                minAcceptedSpeechFrames = normalized.asrMinAcceptedSpeechFrames,
+                shortSpeechAcceptFrames = normalized.asrShortSpeechAcceptFrames
+            )
+        )
         speech.setSpeechProvider(normalized.speechProviderId)
         speech.setDuplexPolicy(
             DuplexPolicy(

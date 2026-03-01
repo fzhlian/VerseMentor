@@ -58,6 +58,15 @@
     <string name="asr_stop_start_cooldown_ms">ASR Stop-to-Start Cooldown (ms)</string>
     <string name="asr_stop_start_cooldown_ms_hint">Cooldown range: %1$d-%2$d ms</string>
     <string name="asr_stop_start_cooldown_ms_invalid">Enter a whole number between %1$d and %2$d</string>
+    <string name="asr_min_accepted_speech_ms">ASR Min Accepted Speech (ms)</string>
+    <string name="asr_min_accepted_speech_ms_hint">Duration range: %1$d-%2$d ms</string>
+    <string name="asr_min_accepted_speech_ms_invalid">Enter a whole number between %1$d and %2$d</string>
+    <string name="asr_min_accepted_speech_frames">ASR Min Accepted Speech Frames</string>
+    <string name="asr_min_accepted_speech_frames_hint">Frame range: %1$d-%2$d</string>
+    <string name="asr_min_accepted_speech_frames_invalid">Enter a whole number between %1$d and %2$d</string>
+    <string name="asr_short_speech_accept_frames">ASR Short Speech Accept Frames</string>
+    <string name="asr_short_speech_accept_frames_hint">Frame range: %1$d-%2$d</string>
+    <string name="asr_short_speech_accept_frames_invalid">Enter a whole number between %1$d and %2$d</string>
     <string name="asr_logs_count">ASR Logs: %1$d</string>
     <string name="asr_logs_copy">Copy ASR Logs</string>
     <string name="asr_logs_clear">Clear ASR Logs</string>
@@ -76,6 +85,9 @@
     <string name="debug_asr_prompt_threshold">ASR Prompt Threshold: %1$d</string>
     <string name="debug_asr_retry_delay_ms">ASR Retry Delay: %1$d ms</string>
     <string name="debug_asr_stop_start_cooldown_ms">ASR Stop-Start Cooldown: %1$d ms</string>
+    <string name="debug_asr_min_accepted_speech_ms">ASR Min Accepted Speech: %1$d ms</string>
+    <string name="debug_asr_min_accepted_speech_frames">ASR Min Accepted Speech Frames: %1$d</string>
+    <string name="debug_asr_short_speech_accept_frames">ASR Short Speech Accept Frames: %1$d</string>
     <string name="debug_reset_asr_tuning">Reset ASR Tuning</string>
     <string name="debug_all_bridge_checks">All Bridge Checks: %1$s</string>
     <string name="debug_check_all_bridge">Check All Bridge</string>

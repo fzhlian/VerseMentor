@@ -26,6 +26,9 @@ class PreferenceStore(context: Context) {
         val transientAsrPromptThreshold = prefs.getInt("transientAsrPromptThreshold", 3)
         val transientAsrRetryDelayMs = prefs.getInt("transientAsrRetryDelayMs", 350)
         val asrStopToStartCooldownMs = prefs.getInt("asrStopToStartCooldownMs", 220)
+        val asrMinAcceptedSpeechMs = prefs.getInt("asrMinAcceptedSpeechMs", 260)
+        val asrMinAcceptedSpeechFrames = prefs.getInt("asrMinAcceptedSpeechFrames", 4)
+        val asrShortSpeechAcceptFrames = prefs.getInt("asrShortSpeechAcceptFrames", 10)
 
         val accentJson = prefs.getString("accentTolerance", null)
         val accent = accentJson?.let {
@@ -56,6 +59,9 @@ class PreferenceStore(context: Context) {
             transientAsrPromptThreshold = transientAsrPromptThreshold,
             transientAsrRetryDelayMs = transientAsrRetryDelayMs,
             asrStopToStartCooldownMs = asrStopToStartCooldownMs,
+            asrMinAcceptedSpeechMs = asrMinAcceptedSpeechMs,
+            asrMinAcceptedSpeechFrames = asrMinAcceptedSpeechFrames,
+            asrShortSpeechAcceptFrames = asrShortSpeechAcceptFrames,
             dynastyMappings = mappings,
             authors = authors
         )
@@ -78,6 +84,9 @@ class PreferenceStore(context: Context) {
             .putInt("transientAsrPromptThreshold", settings.transientAsrPromptThreshold)
             .putInt("transientAsrRetryDelayMs", settings.transientAsrRetryDelayMs)
             .putInt("asrStopToStartCooldownMs", settings.asrStopToStartCooldownMs)
+            .putInt("asrMinAcceptedSpeechMs", settings.asrMinAcceptedSpeechMs)
+            .putInt("asrMinAcceptedSpeechFrames", settings.asrMinAcceptedSpeechFrames)
+            .putInt("asrShortSpeechAcceptFrames", settings.asrShortSpeechAcceptFrames)
             .putString("accentTolerance", gson.toJson(settings.accentTolerance))
             .putString("dynastyMappings", gson.toJson(settings.dynastyMappings))
             .putString("authors", gson.toJson(settings.authors))

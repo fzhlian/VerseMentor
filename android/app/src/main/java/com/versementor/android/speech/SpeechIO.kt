@@ -21,6 +21,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
+import kotlin.math.max
 
 interface ISpeechIO {
     var onAsrResult: ((String, Boolean, Float?) -> Unit)?
@@ -37,6 +38,7 @@ interface ISpeechIO {
     fun listSpeechProviders(): List<SpeechProviderOption>
     fun setSpeechProvider(providerId: String)
     fun setDuplexPolicy(policy: DuplexPolicy)
+    fun setAsrUtterancePolicy(policy: AsrUtterancePolicy)
     fun isListeningDuringSpeakingEnabled(): Boolean
     fun hasCapturedAudio(): Boolean
     fun isCapturePlaybackActive(): Boolean
@@ -73,11 +75,34 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var vadSeenDuringSpeak = false
     private var ttsDuckActive = false
     private var lastAppliedDuckVolume = 1f
+    private var listeningActive = false
+    private var listeningStartedAtMs = 0L
+    private var speechDetectedInCurrentListen = false
+    private var localSilenceTriggered = false
+    private var suppressProviderErrorUntilMs = 0L
+    private var asrUtterancePolicy = AsrUtterancePolicy()
+    private var requestedPolicy = DuplexPolicy(
+        allowListeningDuringSpeaking = false,
+        bargeInMode = BargeInMode.NONE,
+        audioProcessing = AudioProcessingOptions(
+            echoCancellation = true,
+            noiseSuppression = true
+        )
+    )
+    private var effectivePolicy = requestedPolicy
+    private var duplexSuppressedUntilMs = 0L
+    private var duplexEchoHitCount = 0
+    private var lastDuplexEchoHitAtMs = 0L
     private var activeProviderId = SpeechProviderId.IFLYTEK
     private val fallbackVolumeThreshold = 0.2f
     private val fallbackVolumeWarmupMs = 240L
     private val fallbackVolumeRequiredFrames = 3
     private val bargeInMinIntervalMs = 500L
+    private val duplexEchoSuspiciousWindowMs = 900L
+    private val duplexEchoHitWindowMs = 12_000L
+    private val duplexSuppressionDurationMs = 45_000L
+    private val localSilenceTimeoutMs = 5_500L
+    private val localSilenceErrorSuppressMs = 1_200L
     private val arbiter = FullDuplexAudioArbiter(
         DuplexPolicy(
             allowListeningDuringSpeaking = false,
@@ -97,7 +122,12 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
         override fun onAsrResult(text: String, isFinal: Boolean, confidence: Float?) {
             if (released) return
+            maybeRefreshEffectivePolicy(reason = "asr-result")
+            if (text.isNotBlank()) {
+                speechDetectedInCurrentListen = true
+            }
             if (isFinal) {
+                markListeningStopped()
                 arbiter.onListeningStopped()
             }
             val eventType = if (isFinal) "final" else "partial"
@@ -108,6 +138,15 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
         override fun onAsrError(code: Int, message: String) {
             if (released) return
+            val now = System.currentTimeMillis()
+            if (now < suppressProviderErrorUntilMs) {
+                onAsrDebug?.invoke(
+                    "AsrEvent.error suppressed rawCode=$code message=${message.take(64)}"
+                )
+                suppressProviderErrorUntilMs = 0L
+                return
+            }
+            markListeningStopped()
             arbiter.onListeningStopped()
             val mapped = mapProviderError(code, message)
             onAsrDebug?.invoke(
@@ -118,11 +157,13 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
         override fun onSpeechDetected(level: Float) {
             if (released) return
+            maybeRefreshEffectivePolicy(reason = "speech-detected")
             val now = System.currentTimeMillis()
             if (now - lastVolumeLogAtMs >= 240L) {
                 lastVolumeLogAtMs = now
                 onAsrDebug?.invoke("AsrEvent.volume level=%.3f".format(level.coerceIn(0f, 1f)))
             }
+            maybeTriggerLocalSilenceTimeout(now)
             if (!providerSpeaking) return
             if (vadSeenDuringSpeak) return
             if (now - speakingStartedAtMs < fallbackVolumeWarmupMs) return
@@ -142,10 +183,13 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
         override fun onSpeechStart() {
             if (released) return
+            maybeRefreshEffectivePolicy(reason = "speech-start")
+            speechDetectedInCurrentListen = true
             vadSeenDuringSpeak = true
             loudVolumeFrames = 0
             onAsrDebug?.invoke("AsrEvent.vad state=speech_start")
             val now = System.currentTimeMillis()
+            maybeRegisterDuplexEchoHit(now, trigger = "vad")
             if (now - lastBargeInAtMs < bargeInMinIntervalMs) return
             val decision = arbiter.onSpeechStartDetected()
             if (!decision.hasAction()) return
@@ -155,6 +199,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
         override fun onSpeechEnd() {
             if (released) return
+            maybeRefreshEffectivePolicy(reason = "speech-end")
             loudVolumeFrames = 0
             onAsrDebug?.invoke("AsrEvent.vad state=speech_end")
             val decision = arbiter.onSpeechEndDetected()
@@ -163,6 +208,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
         override fun onSpeakingChanged(speaking: Boolean) {
             if (released) return
+            maybeRefreshEffectivePolicy(reason = "speaking-change")
             if (speaking) {
                 providerSpeaking = true
                 speakingStartedAtMs = System.currentTimeMillis()
@@ -230,6 +276,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 onAsrDebug?.invoke("ASR start ignored: released")
                 return@runOnMainSync false
             }
+            maybeRefreshEffectivePolicy(reason = "start-listening")
             val now = System.currentTimeMillis()
             val elapsedSinceStop = now - lastStopRequestAtMs
             if (elapsedSinceStop in 0 until stopToStartCooldownMs) {
@@ -280,11 +327,13 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                     locale = Locale.SIMPLIFIED_CHINESE.toLanguageTag(),
                     partialResults = true,
                     frameMs = 20,
-                    audioProcessing = policy.audioProcessing
+                    audioProcessing = policy.audioProcessing,
+                    utterancePolicy = asrUtterancePolicy
                 )
             )
             if (!started) {
                 arbiter.onListeningStopped()
+                markListeningStopped()
                 startFailureHandled = true
                 onAsrError?.invoke(
                     ERROR_START_LISTENING_FAILED,
@@ -292,6 +341,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 )
                 return@runOnMainSync false
             }
+            markListeningStarted(now)
             onAsrDebug?.invoke(
                 "ASR start provider=${activeProviderId.rawValue} allowDuplex=${policy.allowListeningDuringSpeaking} bargeIn=${policy.bargeInMode.rawValue} duckVolume=${policy.duckVolume} ec=${policy.audioProcessing.echoCancellation} ns=${policy.audioProcessing.noiseSuppression}"
             )
@@ -311,6 +361,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         runOnMainSync(defaultValue = Unit) {
             lastStopRequestAtMs = System.currentTimeMillis()
             activeProvider()?.stopListening(reason = reason)
+            markListeningStopped()
             arbiter.onListeningStopped()
         }
     }
@@ -360,6 +411,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             }
             activeProvider()?.stopListening(reason = "provider-switch")
             activeProvider()?.stopSpeak()
+            markListeningStopped()
             arbiter.onListeningStopped()
             arbiter.onSpeakingStopped()
             providerSpeaking = false
@@ -375,9 +427,27 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
     override fun setDuplexPolicy(policy: DuplexPolicy) {
         runOnMainSync(defaultValue = Unit) {
-            arbiter.updatePolicy(policy)
+            requestedPolicy = policy
+            maybeRefreshEffectivePolicy(reason = "policy-update")
             onAsrDebug?.invoke(
                 "ASR duplex policy -> allowDuringSpeak=${policy.allowListeningDuringSpeaking}, bargeIn=${policy.bargeInMode.rawValue}, duckVolume=${policy.duckVolume}, ec=${policy.audioProcessing.echoCancellation}, ns=${policy.audioProcessing.noiseSuppression}"
+            )
+        }
+    }
+
+    override fun setAsrUtterancePolicy(policy: AsrUtterancePolicy) {
+        runOnMainSync(defaultValue = Unit) {
+            val normalized = policy.copy(
+                minAcceptedSpeechMs = policy.minAcceptedSpeechMs.coerceIn(120, 1200),
+                minAcceptedSpeechFrames = policy.minAcceptedSpeechFrames.coerceIn(2, 40),
+                shortSpeechAcceptFrames = policy.shortSpeechAcceptFrames.coerceIn(2, 40)
+            )
+            asrUtterancePolicy = normalized.copy(
+                shortSpeechAcceptFrames = normalized.shortSpeechAcceptFrames
+                    .coerceAtLeast(normalized.minAcceptedSpeechFrames)
+            )
+            onAsrDebug?.invoke(
+                "ASR utterance policy -> minMs=${asrUtterancePolicy.minAcceptedSpeechMs}, minFrames=${asrUtterancePolicy.minAcceptedSpeechFrames}, shortFrames=${asrUtterancePolicy.shortSpeechAcceptFrames}"
             )
         }
     }
@@ -401,6 +471,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     override fun release() {
         runOnMainSync(defaultValue = Unit) {
             released = true
+            markListeningStopped()
             onAsrResult = null
             onAsrError = null
             onAsrDebug = null
@@ -447,6 +518,92 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
     private fun BargeInDecision.hasAction(): Boolean {
         return stopTts || (duckTts && duckVolume != null) || restoreVolume
+    }
+
+    private fun markListeningStarted(now: Long) {
+        listeningActive = true
+        listeningStartedAtMs = now
+        speechDetectedInCurrentListen = false
+        localSilenceTriggered = false
+        suppressProviderErrorUntilMs = 0L
+    }
+
+    private fun markListeningStopped() {
+        listeningActive = false
+        listeningStartedAtMs = 0L
+        speechDetectedInCurrentListen = false
+        localSilenceTriggered = false
+        suppressProviderErrorUntilMs = 0L
+    }
+
+    private fun maybeTriggerLocalSilenceTimeout(now: Long) {
+        if (!listeningActive) return
+        if (providerSpeaking) return
+        if (speechDetectedInCurrentListen) return
+        if (localSilenceTriggered) return
+        val elapsed = now - listeningStartedAtMs
+        if (elapsed < localSilenceTimeoutMs) return
+        localSilenceTriggered = true
+        listeningActive = false
+        suppressProviderErrorUntilMs = now + localSilenceErrorSuppressMs
+        activeProvider()?.stopListening(reason = "local-silence-timeout")
+        arbiter.onListeningStopped()
+        onAsrDebug?.invoke("AsrEvent.silence timeout=${elapsed}ms -> local-timeout")
+        onAsrError?.invoke(ERROR_SPEECH_TIMEOUT, "local-silence-timeout")
+    }
+
+    private fun maybeRegisterDuplexEchoHit(now: Long, trigger: String) {
+        if (!providerSpeaking) return
+        if (!requestedPolicy.allowListeningDuringSpeaking) return
+        if (!effectivePolicy.allowListeningDuringSpeaking) return
+        val elapsedFromSpeakStart = now - speakingStartedAtMs
+        if (elapsedFromSpeakStart !in 0..duplexEchoSuspiciousWindowMs) return
+        if (now - lastDuplexEchoHitAtMs > duplexEchoHitWindowMs) {
+            duplexEchoHitCount = 0
+        }
+        duplexEchoHitCount += 1
+        lastDuplexEchoHitAtMs = now
+        onAsrDebug?.invoke("ASR duplex echo-hit[$trigger] hits=$duplexEchoHitCount")
+        if (duplexEchoHitCount < 2) return
+        duplexEchoHitCount = 0
+        duplexSuppressedUntilMs = max(duplexSuppressedUntilMs, now + duplexSuppressionDurationMs)
+        maybeRefreshEffectivePolicy(
+            now = now,
+            reason = "echo-protect"
+        )
+    }
+
+    private fun maybeRefreshEffectivePolicy(
+        now: Long = System.currentTimeMillis(),
+        reason: String
+    ) {
+        val expired = duplexSuppressedUntilMs > 0L && now >= duplexSuppressedUntilMs
+        if (expired) {
+            duplexSuppressedUntilMs = 0L
+        }
+        val suppressDuplex = now < duplexSuppressedUntilMs
+        val nextPolicy = if (!suppressDuplex) {
+            requestedPolicy
+        } else {
+            requestedPolicy.copy(
+                allowListeningDuringSpeaking = false,
+                bargeInMode = BargeInMode.NONE,
+                audioProcessing = requestedPolicy.audioProcessing.copy(
+                    echoCancellation = true,
+                    noiseSuppression = true
+                )
+            )
+        }
+        if (nextPolicy == effectivePolicy) {
+            return
+        }
+        effectivePolicy = nextPolicy
+        arbiter.updatePolicy(nextPolicy)
+        val suppressMs = (duplexSuppressedUntilMs - now).coerceAtLeast(0L)
+        val mode = if (suppressDuplex) "duplex-off" else "duplex-requested"
+        onAsrDebug?.invoke(
+            "ASR duplex adaptive[$reason] -> $mode remain=${suppressMs}ms ec=${nextPolicy.audioProcessing.echoCancellation} ns=${nextPolicy.audioProcessing.noiseSuppression}"
+        )
     }
 
     private fun activeProvider(): SpeechProvider? {

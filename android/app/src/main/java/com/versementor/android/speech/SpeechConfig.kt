@@ -33,6 +33,12 @@ data class AudioProcessingOptions(
     val noiseSuppression: Boolean = true
 )
 
+data class AsrUtterancePolicy(
+    val minAcceptedSpeechMs: Int = 260,
+    val minAcceptedSpeechFrames: Int = 4,
+    val shortSpeechAcceptFrames: Int = 10
+)
+
 data class DuplexPolicy(
     val allowListeningDuringSpeaking: Boolean = false,
     val bargeInMode: BargeInMode = BargeInMode.DUCK_TTS,

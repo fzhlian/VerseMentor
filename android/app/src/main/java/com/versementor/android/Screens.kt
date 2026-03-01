@@ -280,6 +280,12 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     var transientDelayError by remember { mutableStateOf(false) }
     var stopStartCooldownText by remember { mutableStateOf(settings.asrStopToStartCooldownMs.toString()) }
     var stopStartCooldownError by remember { mutableStateOf(false) }
+    var minAcceptedSpeechMsText by remember { mutableStateOf(settings.asrMinAcceptedSpeechMs.toString()) }
+    var minAcceptedSpeechMsError by remember { mutableStateOf(false) }
+    var minAcceptedSpeechFramesText by remember { mutableStateOf(settings.asrMinAcceptedSpeechFrames.toString()) }
+    var minAcceptedSpeechFramesError by remember { mutableStateOf(false) }
+    var shortSpeechAcceptFramesText by remember { mutableStateOf(settings.asrShortSpeechAcceptFrames.toString()) }
+    var shortSpeechAcceptFramesError by remember { mutableStateOf(false) }
     var aliasText by remember { mutableStateOf("") }
     var canonicalText by remember { mutableStateOf("") }
     var groupAlias by remember { mutableStateOf("") }
@@ -303,6 +309,13 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     )
     val selectedBargeInName =
         bargeInOptions.firstOrNull { it.first == settings.bargeInMode }?.second ?: settings.bargeInMode
+    val shortSpeechFramesFloor = if (
+        settings.asrMinAcceptedSpeechFrames > SessionViewModel.MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+    ) {
+        settings.asrMinAcceptedSpeechFrames
+    } else {
+        SessionViewModel.MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+    }
 
     LaunchedEffect(settings.variantTtlDays) {
         ttlText = settings.variantTtlDays.toString()
@@ -319,6 +332,18 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     LaunchedEffect(settings.asrStopToStartCooldownMs) {
         stopStartCooldownText = settings.asrStopToStartCooldownMs.toString()
         stopStartCooldownError = false
+    }
+    LaunchedEffect(settings.asrMinAcceptedSpeechMs) {
+        minAcceptedSpeechMsText = settings.asrMinAcceptedSpeechMs.toString()
+        minAcceptedSpeechMsError = false
+    }
+    LaunchedEffect(settings.asrMinAcceptedSpeechFrames) {
+        minAcceptedSpeechFramesText = settings.asrMinAcceptedSpeechFrames.toString()
+        minAcceptedSpeechFramesError = false
+    }
+    LaunchedEffect(settings.asrShortSpeechAcceptFrames) {
+        shortSpeechAcceptFramesText = settings.asrShortSpeechAcceptFrames.toString()
+        shortSpeechAcceptFramesError = false
     }
 
     Column(
@@ -575,6 +600,114 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
                 }
             }
         )
+        OutlinedTextField(
+            value = minAcceptedSpeechMsText,
+            onValueChange = {
+                minAcceptedSpeechMsText = it
+                val value = it.toIntOrNull()
+                val isValid =
+                    value != null &&
+                        value in SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS..SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
+                minAcceptedSpeechMsError = it.isNotEmpty() && !isValid
+                if (isValid) {
+                    value?.let(viewModel::setAsrMinAcceptedSpeechMs)
+                }
+            },
+            label = { Text(text = stringResource(id = R.string.asr_min_accepted_speech_ms)) },
+            isError = minAcceptedSpeechMsError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = {
+                if (minAcceptedSpeechMsError) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_min_accepted_speech_ms_invalid,
+                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS,
+                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
+                        )
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_min_accepted_speech_ms_hint,
+                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS,
+                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
+                        )
+                    )
+                }
+            }
+        )
+        OutlinedTextField(
+            value = minAcceptedSpeechFramesText,
+            onValueChange = {
+                minAcceptedSpeechFramesText = it
+                val value = it.toIntOrNull()
+                val isValid =
+                    value != null &&
+                        value in SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES..SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
+                minAcceptedSpeechFramesError = it.isNotEmpty() && !isValid
+                if (isValid) {
+                    value?.let(viewModel::setAsrMinAcceptedSpeechFrames)
+                }
+            },
+            label = { Text(text = stringResource(id = R.string.asr_min_accepted_speech_frames)) },
+            isError = minAcceptedSpeechFramesError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = {
+                if (minAcceptedSpeechFramesError) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_min_accepted_speech_frames_invalid,
+                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
+                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
+                        )
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_min_accepted_speech_frames_hint,
+                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
+                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
+                        )
+                    )
+                }
+            }
+        )
+        OutlinedTextField(
+            value = shortSpeechAcceptFramesText,
+            onValueChange = {
+                shortSpeechAcceptFramesText = it
+                val value = it.toIntOrNull()
+                val isValid =
+                    value != null &&
+                        value in shortSpeechFramesFloor..SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+                shortSpeechAcceptFramesError = it.isNotEmpty() && !isValid
+                if (isValid) {
+                    value?.let(viewModel::setAsrShortSpeechAcceptFrames)
+                }
+            },
+            label = { Text(text = stringResource(id = R.string.asr_short_speech_accept_frames)) },
+            isError = shortSpeechAcceptFramesError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = {
+                if (shortSpeechAcceptFramesError) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_short_speech_accept_frames_invalid,
+                            shortSpeechFramesFloor,
+                            SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+                        )
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            id = R.string.asr_short_speech_accept_frames_hint,
+                            shortSpeechFramesFloor,
+                            SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+                        )
+                    )
+                }
+            }
+        )
 
         Text(text = stringResource(id = R.string.dynasty_mapping))
         LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
@@ -629,6 +762,24 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
             text = stringResource(
                 id = R.string.debug_asr_stop_start_cooldown_ms,
                 settings.asrStopToStartCooldownMs
+            )
+        )
+        Text(
+            text = stringResource(
+                id = R.string.debug_asr_min_accepted_speech_ms,
+                settings.asrMinAcceptedSpeechMs
+            )
+        )
+        Text(
+            text = stringResource(
+                id = R.string.debug_asr_min_accepted_speech_frames,
+                settings.asrMinAcceptedSpeechFrames
+            )
+        )
+        Text(
+            text = stringResource(
+                id = R.string.debug_asr_short_speech_accept_frames,
+                settings.asrShortSpeechAcceptFrames
             )
         )
         Button(onClick = { viewModel.resetTransientAsrTuning() }) {

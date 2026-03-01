@@ -9,6 +9,25 @@ val useSharedCoreReducer: Boolean = (project.findProperty("useSharedCoreReducer"
     ?.lowercase()
     ?.let { it == "true" || it == "1" || it == "yes" || it == "on" }
     ?: false
+val volcengineAppId: String = (project.findProperty("volcengineAppId") as String?)?.trim().orEmpty()
+val volcengineToken: String = (project.findProperty("volcengineToken") as String?)?.trim().orEmpty()
+val volcengineAsrCluster: String = (project.findProperty("volcengineAsrCluster") as String?)?.trim().orEmpty()
+val volcengineAsrAddress: String =
+    (project.findProperty("volcengineAsrAddress") as String?)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "wss://openspeech.bytedance.com"
+val volcengineAsrUri: String =
+    (project.findProperty("volcengineAsrUri") as String?)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "/api/v2/asr"
+val volcengineUid: String =
+    (project.findProperty("volcengineUid") as String?)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "versementor-android"
+val volcengineResourceId: String = (project.findProperty("volcengineResourceId") as String?)?.trim().orEmpty()
 val releaseStoreFilePath: String =
     (project.findProperty("releaseStoreFile") as String?)?.trim()
         ?.takeIf { it.isNotEmpty() }
@@ -38,10 +57,17 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 16
-        versionName = "0.4.12"
+        versionCode = 17
+        versionName = "0.4.13"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
+        buildConfigField("String", "VOLCENGINE_APP_ID", quoteForBuildConfig(volcengineAppId))
+        buildConfigField("String", "VOLCENGINE_TOKEN", quoteForBuildConfig(volcengineToken))
+        buildConfigField("String", "VOLCENGINE_ASR_CLUSTER", quoteForBuildConfig(volcengineAsrCluster))
+        buildConfigField("String", "VOLCENGINE_ASR_ADDRESS", quoteForBuildConfig(volcengineAsrAddress))
+        buildConfigField("String", "VOLCENGINE_ASR_URI", quoteForBuildConfig(volcengineAsrUri))
+        buildConfigField("String", "VOLCENGINE_UID", quoteForBuildConfig(volcengineUid))
+        buildConfigField("String", "VOLCENGINE_RESOURCE_ID", quoteForBuildConfig(volcengineResourceId))
     }
 
     signingConfigs {
@@ -100,6 +126,9 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.bytedance.speechengine:speechengine_asr_tob:1.1.7") {
+        exclude(group = "com.android.support")
+    }
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

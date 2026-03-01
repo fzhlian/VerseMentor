@@ -43,6 +43,7 @@ interface ISpeechIO {
     fun stopSpeak()
     fun listVoices(): List<VoiceOption>
     fun hasCapturedAudio(): Boolean
+    fun isCapturePlaybackActive(): Boolean
     fun playCapturedAudio(): Boolean
     fun release()
 }
@@ -59,6 +60,13 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         private const val STALE_TIMEOUT_INFRA_ERROR_THRESHOLD = 2
         private const val MAIN_THREAD_WAIT_MS = 1200L
     }
+
+    private data class RecognizerEngineSnapshot(
+        val availableFlag: Boolean,
+        val defaultService: String,
+        val availableServices: List<String>,
+        val recognizerReady: Boolean
+    )
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioManager: AudioManager? =
@@ -257,7 +265,16 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 )
                 return@runOnMainSync false
             }
-            logRecognizerEngineSnapshot("start")
+            val engineSnapshot = logRecognizerEngineSnapshot("start")
+            val fakeEngineReason = detectFakeRecognitionService(engineSnapshot)
+            if (fakeEngineReason != null) {
+                onAsrDebug?.invoke("ASR engine blocked: fake recognition service ($fakeEngineReason)")
+                onAsrError?.invoke(
+                    ERROR_SERVICE_UNAVAILABLE,
+                    context.getString(R.string.asr_error_service_unavailable)
+                )
+                return@runOnMainSync false
+            }
             onAsrDebug?.invoke("ASR audio route: ${buildAudioRouteSnapshot()}")
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -362,9 +379,19 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         return captureFile.exists() && captureFile.length() > 0L
     }
 
+    override fun isCapturePlaybackActive(): Boolean {
+        return runOnMainSync(defaultValue = false) {
+            isCapturePlaybackActiveInternal()
+        }
+    }
+
     override fun playCapturedAudio(): Boolean {
         return runOnMainSync(defaultValue = false) {
             if (isReleased) return@runOnMainSync false
+            if (isCapturePlaybackActiveInternal()) {
+                onAsrDebug?.invoke("ASR capture replay ignored: playback already active")
+                return@runOnMainSync false
+            }
             if (!hasCapturedAudio()) {
                 onAsrDebug?.invoke("ASR capture replay unavailable: no captured audio")
                 return@runOnMainSync false
@@ -661,6 +688,10 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         capturePlayer = null
     }
 
+    private fun isCapturePlaybackActiveInternal(): Boolean {
+        return capturePlayer?.isPlaying == true
+    }
+
     private fun buildAudioRouteSnapshot(): String {
         val am = audioManager ?: return "audioManager=null"
         val mode = am.mode
@@ -703,25 +734,40 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         }
     }
 
-    private fun logRecognizerEngineSnapshot(stage: String) {
-        val availableFlag = SpeechRecognizer.isRecognitionAvailable(context)
-        val defaultService = getConfiguredRecognizerService().orEmpty()
-        val availableServices = queryRecognitionServices()
-        val availableSummary = if (availableServices.isEmpty()) {
+    private fun logRecognizerEngineSnapshot(stage: String): RecognizerEngineSnapshot {
+        val snapshot = RecognizerEngineSnapshot(
+            availableFlag = SpeechRecognizer.isRecognitionAvailable(context),
+            defaultService = getConfiguredRecognizerService().orEmpty(),
+            availableServices = queryRecognitionServices(),
+            recognizerReady = speechRecognizer != null
+        )
+        val availableSummary = if (snapshot.availableServices.isEmpty()) {
             "none"
         } else {
-            availableServices.joinToString("|")
+            snapshot.availableServices.joinToString("|")
         }
-        val recognizerReady = speechRecognizer != null
         val summary =
-            "stage=$stage,available=$availableFlag,default=$defaultService,services=$availableSummary,recognizerReady=$recognizerReady"
+            "stage=$stage,available=${snapshot.availableFlag},default=${snapshot.defaultService},services=$availableSummary,recognizerReady=${snapshot.recognizerReady}"
         if (summary != lastEngineSnapshot || stage == "start") {
             onAsrDebug?.invoke("ASR engine: $summary")
             lastEngineSnapshot = summary
         }
-        if (defaultService.isNotBlank() && availableServices.none { it == defaultService }) {
-            onAsrDebug?.invoke("ASR engine warning: default service not in query list -> $defaultService")
+        if (snapshot.defaultService.isNotBlank() && snapshot.availableServices.none { it == snapshot.defaultService }) {
+            onAsrDebug?.invoke("ASR engine warning: default service not in query list -> ${snapshot.defaultService}")
         }
+        return snapshot
+    }
+
+    private fun detectFakeRecognitionService(snapshot: RecognizerEngineSnapshot): String? {
+        val default = snapshot.defaultService
+        if (default.contains("FakeRecognitionService", ignoreCase = true)) {
+            return "default=$default"
+        }
+        val available = snapshot.availableServices
+        if (available.isNotEmpty() && available.all { it.contains("FakeRecognitionService", ignoreCase = true) }) {
+            return "services=${available.joinToString("|")}"
+        }
+        return null
     }
 
     private fun getConfiguredRecognizerService(): String? {

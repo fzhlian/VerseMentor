@@ -722,19 +722,18 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun hasCapturedAudio(): Boolean {
-        return speech.hasCapturedAudio()
+        return speech.hasCapturedAudio() && !speech.isCapturePlaybackActive()
     }
 
     fun replayCapturedAudio() {
         val replayed = speech.playCapturedAudio()
+        val replayLog = when {
+            replayed -> "ASR debug: capture replay requested by app"
+            speech.isCapturePlaybackActive() -> "ASR debug: capture replay busy"
+            else -> "ASR debug: capture replay unavailable"
+        }
         uiState = uiState.copy(
-            logs = appendLog(
-                if (replayed) {
-                    "ASR debug: capture replay requested by app"
-                } else {
-                    "ASR debug: capture replay unavailable"
-                }
-            )
+            logs = appendLog(replayLog)
         )
     }
 

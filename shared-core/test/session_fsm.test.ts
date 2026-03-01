@@ -1026,6 +1026,33 @@ describe('session_fsm', () => {
     ])
   })
 
+  test('RECITE_READY partial ASR should enter RECITING without replay prompt', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession(ctx)
+    const reciteReady = {
+      ...initial,
+      type: 'RECITE_READY' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 0,
+        lastUserActiveAt: now
+      }
+    }
+
+    const ts = now + 1200
+    const output = sessionReducer(reciteReady, {
+      type: 'USER_ASR',
+      text: samplePoems[0].lines[0].text.slice(0, 2),
+      isFinal: false,
+      now: ts
+    })
+
+    expect(output.state.type).toBe('RECITING')
+    expect(output.state.ctx.lastUserActiveAt).toBe(ts)
+    expect(output.actions).toEqual([])
+  })
+
   test('USER_ASR now overrides lastUserActiveAt in reciting flow', () => {
     const ctx = makeCtx()
     const initial = createInitialSession({ ...ctx, lastUserActiveAt: now })
@@ -1049,6 +1076,65 @@ describe('session_fsm', () => {
 
     expect(output.state.type).toBe('RECITING')
     expect(output.state.ctx.lastUserActiveAt).toBe(ts)
+  })
+
+  test('USER_ASR partial also refreshes lastUserActiveAt in reciting flow', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession({ ...ctx, lastUserActiveAt: now })
+    const reciting = {
+      ...initial,
+      type: 'RECITING' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 0,
+        lastUserActiveAt: now
+      }
+    }
+    const ts = now + 1800
+    const output = sessionReducer(reciting, {
+      type: 'USER_ASR',
+      text: samplePoems[0].lines[0].text.slice(0, 2),
+      isFinal: false,
+      now: ts
+    })
+
+    expect(output.state.type).toBe('RECITING')
+    expect(output.state.ctx.lastUserActiveAt).toBe(ts)
+    expect(output.actions).toEqual([])
+  })
+
+  test('HINT_OFFER final recite content should be scored directly', () => {
+    const ctx = makeCtx()
+    const initial = createInitialSession({ ...ctx, lastUserActiveAt: now })
+    const hintOffer = {
+      ...initial,
+      type: 'HINT_OFFER' as const,
+      ctx: {
+        ...initial.ctx,
+        selectedPoem: samplePoems[0],
+        currentLineIdx: 0,
+        lastUserActiveAt: now,
+        timers: {
+          ...initial.ctx.timers,
+          hintOfferSince: now
+        }
+      }
+    }
+
+    const output = sessionReducer(hintOffer, {
+      type: 'USER_ASR',
+      text: samplePoems[0].lines[0].text,
+      isFinal: true,
+      now: now + 2500
+    })
+
+    expect(output.state.type).toBe('RECITING')
+    expect(output.state.ctx.currentLineIdx).toBe(1)
+    expect(output.actions).toEqual([
+      { type: 'SPEAK', text: '很好，下一句。' },
+      { type: 'START_LISTENING' }
+    ])
   })
 
   test('HINT_GIVEN should evaluate immediate ASR instead of forcing repeat', () => {

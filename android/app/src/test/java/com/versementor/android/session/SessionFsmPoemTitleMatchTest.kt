@@ -1004,6 +1004,30 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun reciteReady_whenPartialAsr_transitionsWithoutPromptingLineOne() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.RECITE_READY) {
+            selectedPoem = poem
+            currentLineIdx = 0
+            lastUserActiveAt = 4000L
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = poem.lines[0].text.take(2),
+                isFinal = false,
+                confidence = null,
+                now = 4005L
+            )
+        )
+
+        assertEquals(SessionStateType.RECITING, output.state.type)
+        assertEquals(4005L, output.state.ctx.lastUserActiveAt)
+        assertTrue(output.actions.isEmpty())
+    }
+
+    @Test
     fun reciteReady_whenNoAsr_promptsLineOneAndEntersReciting() {
         val poem = SamplePoems.poems.first()
         val state = stateOf(SessionStateType.RECITE_READY) {
@@ -1075,6 +1099,30 @@ class SessionFsmPoemTitleMatchTest {
     }
 
     @Test
+    fun reciting_whenPartialAsr_refreshesLastUserActiveAt() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.RECITING) {
+            selectedPoem = poem
+            currentLineIdx = 0
+            lastUserActiveAt = 4010L
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = poem.lines[0].text.take(2),
+                isFinal = false,
+                confidence = null,
+                now = 4018L
+            )
+        )
+
+        assertEquals(SessionStateType.RECITING, output.state.type)
+        assertEquals(4018L, output.state.ctx.lastUserActiveAt)
+        assertTrue(output.actions.isEmpty())
+    }
+
+    @Test
     fun hintOffer_whenUserDoesNotAskHint_resumesRecitingWithoutHint() {
         val poem = SamplePoems.poems.first()
         val state = stateOf(SessionStateType.HINT_OFFER) {
@@ -1098,6 +1146,34 @@ class SessionFsmPoemTitleMatchTest {
             "\u597d\u7684\uff0c\u7ee7\u7eed\u3002",
             output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
         )
+    }
+
+    @Test
+    fun hintOffer_whenUserKeepsReciting_evaluatesLineDirectly() {
+        val poem = SamplePoems.poems.first()
+        val state = stateOf(SessionStateType.HINT_OFFER) {
+            selectedPoem = poem
+            currentLineIdx = 0
+            hintOfferSince = 4000L
+        }
+
+        val output = reducer.reduce(
+            state,
+            SessionEvent.UserAsr(
+                text = poem.lines[0].text,
+                isFinal = true,
+                confidence = 0.95f,
+                now = 4020L
+            )
+        )
+
+        assertEquals(SessionStateType.RECITING, output.state.type)
+        assertEquals(1, output.state.ctx.currentLineIdx)
+        assertEquals(
+            "\u5f88\u597d\uff0c\u4e0b\u4e00\u53e5\u3002",
+            output.actions.filterIsInstance<SessionAction.Speak>().firstOrNull()?.text
+        )
+        assertTrue(output.actions.any { it is SessionAction.StartListening })
     }
 
     @Test

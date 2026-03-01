@@ -182,6 +182,19 @@ function isConfirmPoemUtterance(raw: string): boolean {
     normalized.includes('就这首')
 }
 
+function isDeclineHintUtterance(raw: string): boolean {
+  const normalized = normalizeIntentText(raw)
+  if (!normalized) return false
+  return normalized === '继续' ||
+    normalized === '继续背诵' ||
+    normalized === '继续吧' ||
+    normalized.includes('不用提示') ||
+    normalized.includes('不需要提示') ||
+    normalized.includes('不要提示') ||
+    normalized.includes('先不用') ||
+    normalized.includes('不用了')
+}
+
 function isSelectedPoemDynastyAuthorMatch(
   spokenText: string,
   poem: Poem,
@@ -426,9 +439,23 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     case 'RECITE_READY': {
       const poem = ctx.selectedPoem
       if (!poem) return withState('EXIT')
-      const nextCtx = { ...ctx, currentLineIdx: 0, lastUserActiveAt: Date.now() }
-      if (event.type === 'USER_ASR' && event.isFinal) {
-        return reduceRecitingAsr(nextCtx, event.text, event.now)
+      if (event.type === 'USER_ASR') {
+        const activityNow = event.now ?? Date.now()
+        const hasSpeech = event.text.trim().length > 0
+        const nextCtx = {
+          ...ctx,
+          currentLineIdx: 0,
+          lastUserActiveAt: hasSpeech ? activityNow : (ctx.lastUserActiveAt ?? activityNow)
+        }
+        if (event.isFinal) {
+          return reduceRecitingAsr(nextCtx, event.text, event.now)
+        }
+        return withState('RECITING', nextCtx)
+      }
+      const nextCtx = {
+        ...ctx,
+        currentLineIdx: 0,
+        lastUserActiveAt: ctx.lastUserActiveAt ?? Date.now()
       }
       actions.push({ type: 'SPEAK', text: `请背诵第一句。` })
       actions.push({ type: 'START_LISTENING' })
@@ -448,7 +475,14 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
           return withState('HINT_OFFER', nextCtx)
         }
       }
-      if (event.type === 'USER_ASR' && event.isFinal) {
+      if (event.type === 'USER_ASR') {
+        if (!event.isFinal) {
+          if (!event.text.trim()) {
+            return withState('RECITING')
+          }
+          const nextCtx = { ...ctx, lastUserActiveAt: event.now ?? Date.now() }
+          return withState('RECITING', nextCtx)
+        }
         return reduceRecitingAsr(ctx, event.text, event.now)
       }
       return withState('RECITING')
@@ -474,7 +508,18 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
           return withState('HINT_OFFER', nextCtx)
         }
       }
-      if (event.type === 'USER_ASR' && event.isFinal) {
+      if (event.type === 'USER_ASR') {
+        if (!event.isFinal) {
+          if (!event.text.trim()) {
+            return withState('HINT_OFFER')
+          }
+          const nextCtx = {
+            ...ctx,
+            lastUserActiveAt: event.now ?? Date.now(),
+            timers: { ...ctx.timers, hintOfferSince: undefined }
+          }
+          return withState('RECITING', nextCtx)
+        }
         const intent = parseIntent(event.text)
         const nextCtx = {
           ...ctx,
@@ -488,9 +533,12 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
           actions.push({ type: 'START_LISTENING' })
           return withState('HINT_GIVEN', nextCtx)
         }
-        actions.push({ type: 'SPEAK', text: '好的，继续。' })
-        actions.push({ type: 'START_LISTENING' })
-        return withState('RECITING', nextCtx)
+        if (isDeclineHintUtterance(event.text)) {
+          actions.push({ type: 'SPEAK', text: '好的，继续。' })
+          actions.push({ type: 'START_LISTENING' })
+          return withState('RECITING', nextCtx)
+        }
+        return reduceRecitingAsr(nextCtx, event.text, event.now)
       }
       return withState('HINT_OFFER')
 

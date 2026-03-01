@@ -138,7 +138,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 uiState = uiState.copy(
                     liveHeard = heard,
                     lastHeard = heard,
-                    awaitingSpeech = false,
+                    awaitingSpeech = !isFinal,
                     recognizedLines = nextRecognizedLines
                 )
                 dispatch(SessionEvent.UserAsr(text, isFinal, confidence, System.currentTimeMillis()))

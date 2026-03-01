@@ -234,12 +234,17 @@ class SessionReducer {
 
             SessionStateType.RECITE_READY -> {
                 if (ctx.selectedPoem == null) return next(SessionStateType.EXIT)
-                if (event is SessionEvent.UserAsr && event.isFinal) {
+                if (event is SessionEvent.UserAsr) {
                     if (ctx.currentLineIdx != 0) {
                         ctx.currentLineIdx = 0
                     }
-                    ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
-                    return reduce(SessionState(SessionStateType.RECITING, ctx), event)
+                    if (event.text.isNotBlank() || ctx.lastUserActiveAt == null) {
+                        ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
+                    }
+                    if (event.isFinal) {
+                        return reduce(SessionState(SessionStateType.RECITING, ctx), event)
+                    }
+                    return next(SessionStateType.RECITING)
                 }
                 if (ctx.currentLineIdx != 0) {
                     ctx.currentLineIdx = 0
@@ -265,7 +270,12 @@ class SessionReducer {
                         return next(SessionStateType.RECITING)
                     }
                     is SessionEvent.UserAsr -> {
-                        if (!event.isFinal) return next(SessionStateType.RECITING)
+                        if (!event.isFinal) {
+                            if (event.text.isNotBlank()) {
+                                ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
+                            }
+                            return next(SessionStateType.RECITING)
+                        }
                         ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
                         val poem = ctx.selectedPoem ?: return next(SessionStateType.EXIT)
                         val line = poem.lines.getOrNull(ctx.currentLineIdx)?.text ?: ""
@@ -319,7 +329,14 @@ class SessionReducer {
                         return next(SessionStateType.HINT_OFFER)
                     }
                     is SessionEvent.UserAsr -> {
-                        if (!event.isFinal) return next(SessionStateType.HINT_OFFER)
+                        if (!event.isFinal) {
+                            if (event.text.isNotBlank()) {
+                                ctx.hintOfferSince = null
+                                ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
+                                return next(SessionStateType.RECITING)
+                            }
+                            return next(SessionStateType.HINT_OFFER)
+                        }
                         ctx.hintOfferSince = null
                         val poem = ctx.selectedPoem
                         if (poem != null && isAskHintIntent(event.text)) {
@@ -329,9 +346,13 @@ class SessionReducer {
                             actions += SessionAction.StartListening
                             return next(SessionStateType.HINT_GIVEN)
                         }
-                        actions += SessionAction.Speak("好的，继续。")
-                        actions += SessionAction.StartListening
-                        return next(SessionStateType.RECITING)
+                        if (isDeclineHintIntent(event.text)) {
+                            actions += SessionAction.Speak("好的，继续。")
+                            actions += SessionAction.StartListening
+                            return next(SessionStateType.RECITING)
+                        }
+                        ctx.lastUserActiveAt = event.now ?: System.currentTimeMillis()
+                        return reduce(SessionState(SessionStateType.RECITING, ctx), event)
                     }
                     else -> return next(SessionStateType.HINT_OFFER)
                 }
@@ -477,6 +498,19 @@ class SessionReducer {
             raw.contains("不会了") ||
             raw.contains("提示一下") ||
             raw.contains("帮我")
+    }
+
+    private fun isDeclineHintIntent(text: String): Boolean {
+        val raw = normalizeForIntent(text)
+        if (raw.isEmpty()) return false
+        return raw == "继续" ||
+            raw == "继续背诵" ||
+            raw == "继续吧" ||
+            raw.contains("不用提示") ||
+            raw.contains("不需要提示") ||
+            raw.contains("不要提示") ||
+            raw.contains("先不用") ||
+            raw.contains("不用了")
     }
 
     private fun normalizeForIntent(text: String): String {

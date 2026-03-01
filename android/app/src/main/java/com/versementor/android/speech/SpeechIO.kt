@@ -770,15 +770,21 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             lastEngineSnapshot = summary
         }
         if (snapshot.defaultService.isNotBlank() && snapshot.availableServices.none { it == snapshot.defaultService }) {
-            onAsrDebug?.invoke("ASR engine warning: default service not in query list -> ${snapshot.defaultService}")
+            onAsrDebug?.invoke(
+                "ASR engine warning: default service not in query list (may be package visibility limits) -> ${snapshot.defaultService}"
+            )
         }
         return snapshot
     }
 
     private fun detectFakeRecognitionService(snapshot: RecognizerEngineSnapshot): String? {
-        val default = snapshot.defaultService
-        if (default.contains("FakeRecognitionService", ignoreCase = true)) {
-            return "default=$default"
+        val defaultService = snapshot.defaultService.trim()
+        if (defaultService.isNotBlank()) {
+            // Trust explicit system default first; only block when the default itself is fake.
+            if (defaultService.contains("FakeRecognitionService", ignoreCase = true)) {
+                return "default=$defaultService"
+            }
+            return null
         }
         val available = snapshot.availableServices
         if (available.isNotEmpty() && available.all { it.contains("FakeRecognitionService", ignoreCase = true) }) {

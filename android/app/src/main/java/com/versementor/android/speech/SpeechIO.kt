@@ -37,6 +37,7 @@ interface ISpeechIO {
     var onAsrDebug: ((String) -> Unit)?
     var onSpeaking: ((Boolean) -> Unit)?
     fun startListening(): Boolean
+    fun consumeStartFailureHandled(): Boolean
     fun stopListening(reason: String = "app")
     fun setStopToStartCooldownMs(cooldownMs: Int)
     fun speak(text: String, voiceId: String?)
@@ -99,6 +100,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var suppressNextClientError = false
     private var isReleased = false
     private var lastEngineSnapshot: String? = null
+    private var startFailureHandled = false
     override var onAsrResult: ((String, Boolean, Float?) -> Unit)? = null
     override var onAsrError: ((Int, String) -> Unit)? = null
     override var onAsrDebug: ((String) -> Unit)? = null
@@ -204,6 +206,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
 
     override fun startListening(): Boolean {
         return runOnMainSync(defaultValue = false) {
+            startFailureHandled = false
             if (isReleased) {
                 onAsrDebug?.invoke("ASR start ignored: released")
                 return@runOnMainSync false
@@ -211,6 +214,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             val recognizer = speechRecognizer
             if (recognizer == null) {
                 onAsrDebug?.invoke("ASR unavailable on device")
+                startFailureHandled = true
                 onAsrError?.invoke(ERROR_SERVICE_UNAVAILABLE, context.getString(R.string.asr_error_service_unavailable))
                 return@runOnMainSync false
             }
@@ -251,6 +255,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             ) == PackageManager.PERMISSION_GRANTED
             if (!hasMicPermission) {
                 onAsrDebug?.invoke("ASR start blocked: RECORD_AUDIO permission denied")
+                startFailureHandled = true
                 onAsrError?.invoke(
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
                     context.getString(R.string.asr_error_insufficient_permissions)
@@ -259,6 +264,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             }
             if (audioManager?.isMicrophoneMute == true) {
                 onAsrDebug?.invoke("ASR start blocked: system microphone is muted")
+                startFailureHandled = true
                 onAsrError?.invoke(
                     SpeechRecognizer.ERROR_AUDIO,
                     mapAsrError(SpeechRecognizer.ERROR_AUDIO)
@@ -269,6 +275,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             val fakeEngineReason = detectFakeRecognitionService(engineSnapshot)
             if (fakeEngineReason != null) {
                 onAsrDebug?.invoke("ASR engine blocked: fake recognition service ($fakeEngineReason)")
+                startFailureHandled = true
                 onAsrError?.invoke(
                     ERROR_SERVICE_UNAVAILABLE,
                     context.getString(R.string.asr_error_service_unavailable)
@@ -307,11 +314,20 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 safeCancelRecognizer("start-failure", suppressClientError = true)
                 forceResetAsrState()
                 onAsrDebug?.invoke("ASR startListening failed: ${it.message ?: "unknown"}")
+                startFailureHandled = true
                 onAsrError?.invoke(
                     ERROR_START_LISTENING_FAILED,
                     it.message ?: context.getString(R.string.asr_error_start_listening_failed)
                 )
             }.getOrDefault(false)
+        }
+    }
+
+    override fun consumeStartFailureHandled(): Boolean {
+        return runOnMainSync(defaultValue = false) {
+            val handled = startFailureHandled
+            startFailureHandled = false
+            handled
         }
     }
 

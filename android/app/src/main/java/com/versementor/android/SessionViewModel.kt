@@ -415,6 +415,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             )
             return
         }
+        if (speech.consumeStartFailureHandled()) {
+            // startListening already emitted a concrete ASR error (infra/permission/etc.),
+            // so this is not a "not ready" case and should not enter retry/backoff logs.
+            consecutiveStartNotReady = 0
+            return
+        }
         consecutiveStartNotReady += 1
         val retryCount = consecutiveStartNotReady
         val shouldForceStop = retryCount >= START_NOT_READY_FORCE_STOP_THRESHOLD

@@ -9,9 +9,11 @@ export interface SpeechAsrError {
   message: string
 }
 
-export type SpeechProviderId = 'iflytek' | 'volcengine'
+export type SpeechProviderId = 'iflytek' | 'volc'
 
 export type BargeInMode = 'none' | 'duck_tts' | 'stop_tts_on_speech'
+
+export type MicPermissionStatus = 'granted' | 'denied' | 'unknown'
 
 export interface SpeechAudioProcessingOptions {
   echoCancellation?: boolean
@@ -21,6 +23,7 @@ export interface SpeechAudioProcessingOptions {
 export interface SpeechDuplexOptions {
   allowListeningDuringSpeaking?: boolean
   bargeInMode?: BargeInMode
+  duckVolume?: number
   audioProcessing?: SpeechAudioProcessingOptions
 }
 
@@ -76,6 +79,15 @@ export interface SpeakOptions {
   providerId?: SpeechProviderId
 }
 
+export interface SpeechDiagnostics {
+  activeProvider: SpeechProviderId
+  providerName: string
+  asrReady: boolean
+  ttsReady: boolean
+  lastError: string
+  micPermissionStatus: MicPermissionStatus
+}
+
 export interface SpeechDebugState {
   listening: boolean
   speaking: boolean
@@ -86,6 +98,7 @@ export interface SpeechDebugState {
   duplexOptions: SpeechDuplexOptions
   mockScriptRunning: boolean
   pendingScriptTimers: number
+  diagnostics: SpeechDiagnostics
 }
 
 export interface ISpeechIO {
@@ -94,12 +107,14 @@ export interface ISpeechIO {
   onAsrResult(handler: (result: SpeechAsrResult) => void): void
   onAsrError(handler: (error: SpeechAsrError) => void): void
   onSpeakingStateChange(handler: (speaking: boolean) => void): void
+  onDiagnosticsChange(handler: (diagnostics: SpeechDiagnostics) => void): void
   speak(text: string, options?: SpeakOptions): void
   stopSpeak(): void
   listVoices(): Promise<SpeechVoice[]>
   setActiveProvider(providerId: SpeechProviderId): void
   listProviders(): Promise<SpeechProviderDescriptor[]>
   configureDuplex(options: SpeechDuplexOptions): void
+  getDiagnostics(): SpeechDiagnostics
 }
 
 export interface IMockSpeechIO extends ISpeechIO {

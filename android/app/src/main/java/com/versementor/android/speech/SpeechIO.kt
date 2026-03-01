@@ -276,9 +276,10 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             if (fakeEngineReason != null) {
                 onAsrDebug?.invoke("ASR engine blocked: fake recognition service ($fakeEngineReason)")
                 startFailureHandled = true
+                val enginePackage = resolveCurrentEnginePackage(engineSnapshot)
                 onAsrError?.invoke(
                     ERROR_SERVICE_UNAVAILABLE,
-                    context.getString(R.string.asr_error_service_unavailable)
+                    context.getString(R.string.asr_error_fake_engine, enginePackage)
                 )
                 return@runOnMainSync false
             }
@@ -784,6 +785,16 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             return "services=${available.joinToString("|")}"
         }
         return null
+    }
+
+    private fun resolveCurrentEnginePackage(snapshot: RecognizerEngineSnapshot): String {
+        val source = when {
+            snapshot.defaultService.isNotBlank() -> snapshot.defaultService
+            snapshot.availableServices.isNotEmpty() -> snapshot.availableServices.first()
+            else -> "unknown"
+        }
+        val pkg = source.substringBefore('/').trim()
+        return if (pkg.isNotBlank()) pkg else "unknown"
     }
 
     private fun getConfiguredRecognizerService(): String? {

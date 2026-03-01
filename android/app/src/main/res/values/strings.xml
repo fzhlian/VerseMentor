@@ -89,5 +89,6 @@
     <string name="asr_error_speech_timeout">Speech timeout</string>
     <string name="asr_error_code">Error code %1$d</string>
     <string name="asr_error_service_unavailable">Speech recognition service is unavailable on this device.</string>
+    <string name="asr_error_fake_engine">Detected placeholder speech engine (%1$s). Please switch the speech recognition service in system settings.</string>
     <string name="asr_error_start_listening_failed">startListening failed</string>
 </resources>

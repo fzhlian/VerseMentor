@@ -89,5 +89,6 @@
     <string name="asr_error_speech_timeout">说话超时</string>
     <string name="asr_error_code">错误代码 %1$d</string>
     <string name="asr_error_service_unavailable">当前设备不支持语音识别服务。</string>
+    <string name="asr_error_fake_engine">检测到占位语音引擎（%1$s），请到系统设置切换语音识别服务。</string>
     <string name="asr_error_start_listening_failed">启动识别失败</string>
 </resources>

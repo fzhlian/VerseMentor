@@ -54,6 +54,9 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         const val MAX_ASR_STOP_TO_START_COOLDOWN_MS = 1200
         private const val MAX_VARIANTS_PER_LINE = 4
         private const val MAX_UI_LOG_LINES = 200
+        private const val START_NOT_READY_LOG_EVERY = 4
+        private const val START_NOT_READY_FORCE_STOP_THRESHOLD = 8
+        private const val START_NOT_READY_BACKOFF_DELAY_MS = 700
     }
 
     private val prefs = PreferenceStore(app)
@@ -70,6 +73,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingStartListening = false
     private var isManuallyPaused = false
     private var consecutiveTransientAsrErrors = 0
+    private var consecutiveStartNotReady = 0
     private var transientRetryJob: Job? = null
 
     var uiState: SessionUiState by mutableStateOf(SessionUiState())
@@ -110,6 +114,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 transientRetryJob?.cancel()
                 transientRetryJob = null
                 consecutiveTransientAsrErrors = 0
+                consecutiveStartNotReady = 0
                 val heard = text.trim()
                 val nextRecognizedLines = if (isFinal && heard.isNotEmpty() && uiState.recognizedLines.lastOrNull() != heard) {
                     uiState.recognizedLines + heard
@@ -130,6 +135,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (!uiState.sessionActive || uiState.sessionPaused) {
                     return@launch
                 }
+                consecutiveStartNotReady = 0
                 if (
                     code == SpeechIO.ERROR_SERVICE_UNAVAILABLE ||
                     code == SpeechIO.ERROR_START_LISTENING_FAILED
@@ -270,6 +276,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         pendingStartListening = false
         isManuallyPaused = false
         consecutiveTransientAsrErrors = 0
+        consecutiveStartNotReady = 0
         transientRetryJob?.cancel()
         transientRetryJob = null
         uiState = SessionUiState(
@@ -328,6 +335,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
 
                 SessionAction.StopListening -> {
                     pendingStartListening = false
+                    consecutiveStartNotReady = 0
                     uiState = uiState.copy(awaitingSpeech = false)
                     speech.stopListening()
                 }
@@ -348,6 +356,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         pendingStartListening = false
         transientRetryJob?.cancel()
         transientRetryJob = null
+        consecutiveStartNotReady = 0
         speech.stopListening()
         uiState = uiState.copy(
             sessionPaused = true,
@@ -376,6 +385,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         isManuallyPaused = false
         isSpeaking = false
         consecutiveTransientAsrErrors = 0
+        consecutiveStartNotReady = 0
         transientRetryJob?.cancel()
         transientRetryJob = null
         speech.stopListening()
@@ -396,6 +406,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         }
         val started = speech.startListening()
         if (started) {
+            consecutiveStartNotReady = 0
             uiState = uiState.copy(
                 statusText = text(R.string.waiting_input),
                 awaitingSpeech = true,
@@ -403,16 +414,45 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             )
             return
         }
-        uiState = uiState.copy(
-            awaitingSpeech = false,
-            statusText = resolveStatusText(state.type, awaitingSpeech = false),
-            logs = appendLog("ASR start not ready, schedule retry")
-        )
+        consecutiveStartNotReady += 1
+        val retryCount = consecutiveStartNotReady
+        val shouldForceStop = retryCount >= START_NOT_READY_FORCE_STOP_THRESHOLD
+        if (shouldForceStop) {
+            speech.stopListening()
+        }
+        val retryLog = when {
+            retryCount <= 3 -> "ASR start not ready x$retryCount, schedule retry"
+            retryCount % START_NOT_READY_LOG_EVERY == 0 -> {
+                if (shouldForceStop) {
+                    "ASR start not ready x$retryCount, force stop and backoff retry"
+                } else {
+                    "ASR start still not ready x$retryCount, schedule retry"
+                }
+            }
+            else -> null
+        }
+        uiState = if (retryLog != null) {
+            uiState.copy(
+                awaitingSpeech = false,
+                statusText = resolveStatusText(state.type, awaitingSpeech = false),
+                logs = appendLog(retryLog)
+            )
+        } else {
+            uiState.copy(
+                awaitingSpeech = false,
+                statusText = resolveStatusText(state.type, awaitingSpeech = false)
+            )
+        }
         if (!uiState.sessionActive || uiState.sessionPaused || isManuallyPaused || isSpeaking) {
             return
         }
+        val retryDelayMs = when {
+            shouldForceStop -> START_NOT_READY_BACKOFF_DELAY_MS
+            retryCount >= START_NOT_READY_LOG_EVERY -> settings.transientAsrRetryDelayMs.coerceAtLeast(350)
+            else -> settings.transientAsrRetryDelayMs.coerceAtMost(200)
+        }
         scheduleTransientAsrRetry(
-            delayMs = settings.transientAsrRetryDelayMs.coerceAtMost(200)
+            delayMs = retryDelayMs
         )
     }
 

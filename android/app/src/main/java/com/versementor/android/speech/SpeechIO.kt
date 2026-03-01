@@ -44,6 +44,10 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         const val ERROR_START_LISTENING_FAILED = -1
         const val ERROR_SERVICE_UNAVAILABLE = -2
         private const val DEFAULT_STOP_TO_START_COOLDOWN_MS = 220L
+        private const val STOP_COMPLETION_TIMEOUT_BUFFER_MS = 320L
+        private const val MIN_STOP_COMPLETION_TIMEOUT_MS = 450L
+        private const val MAX_STOP_COMPLETION_TIMEOUT_MS = 1800L
+        private const val LISTENING_STALE_TIMEOUT_MS = 6500L
         private const val MAIN_THREAD_WAIT_MS = 1200L
     }
 
@@ -65,7 +69,11 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var isListening = false
     private var isStopping = false
     private var lastStopRequestAtMs = 0L
+    private var lastStartRequestAtMs = 0L
+    private var lastRecognizerCallbackAtMs = 0L
     private var stopToStartCooldownMs = DEFAULT_STOP_TO_START_COOLDOWN_MS
+    private var stopCompletionTimeoutRunnable: Runnable? = null
+    private var listeningStaleTimeoutRunnable: Runnable? = null
     private var suppressNextClientError = false
     private var isReleased = false
     override var onAsrResult: ((String, Boolean, Float?) -> Unit)? = null
@@ -77,35 +85,38 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 if (isReleased) return
+                touchRecognizerCallbackClock()
                 onAsrDebug?.invoke("ASR readyForSpeech")
             }
             override fun onBeginningOfSpeech() {
                 if (isReleased) return
+                touchRecognizerCallbackClock()
                 onAsrDebug?.invoke("ASR beginningOfSpeech")
             }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {
                 if (isReleased) return
+                touchRecognizerCallbackClock()
                 onAsrDebug?.invoke("ASR endOfSpeech")
             }
             override fun onError(error: Int) {
                 if (isReleased) return
-                isListening = false
-                isStopping = false
-                if (error == SpeechRecognizer.ERROR_CLIENT && suppressNextClientError) {
+                touchRecognizerCallbackClock()
+                val shouldSuppressClientError =
+                    error == SpeechRecognizer.ERROR_CLIENT && suppressNextClientError
+                forceResetAsrState()
+                if (shouldSuppressClientError) {
                     onAsrDebug?.invoke("ASR expected client error suppressed")
-                    suppressNextClientError = false
                     return
                 }
-                suppressNextClientError = false
                 onAsrDebug?.invoke("ASR error($error): ${mapAsrError(error)}")
                 onAsrError?.invoke(error, mapAsrError(error))
             }
             override fun onResults(results: Bundle?) {
                 if (isReleased) return
-                isListening = false
-                isStopping = false
+                touchRecognizerCallbackClock()
+                forceResetAsrState()
                 suppressNextClientError = false
                 val bundle = results ?: return
                 val list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -123,12 +134,14 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             }
             override fun onPartialResults(partialResults: Bundle?) {
                 if (isReleased) return
+                touchRecognizerCallbackClock()
                 val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = list?.firstOrNull() ?: return
                 onAsrResult?.invoke(text, false, null)
             }
             override fun onEvent(eventType: Int, params: Bundle?) {
                 if (isReleased) return
+                touchRecognizerCallbackClock()
                 onAsrDebug?.invoke("ASR event type=$eventType")
             }
         })
@@ -169,11 +182,36 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 onAsrDebug?.invoke("ASR start ignored: released")
                 return@runOnMainSync false
             }
+            val recognizer = speechRecognizer
+            if (recognizer == null) {
+                onAsrDebug?.invoke("ASR unavailable on device")
+                onAsrError?.invoke(ERROR_SERVICE_UNAVAILABLE, context.getString(R.string.asr_error_service_unavailable))
+                return@runOnMainSync false
+            }
+            val now = System.currentTimeMillis()
+            if (isListening && !isStopping) {
+                val aliveAt = maxOf(lastStartRequestAtMs, lastRecognizerCallbackAtMs)
+                val elapsedSinceRecognizerActivity = now - aliveAt
+                if (aliveAt > 0 && elapsedSinceRecognizerActivity >= LISTENING_STALE_TIMEOUT_MS) {
+                    onAsrDebug?.invoke(
+                        "ASR listening stale ${elapsedSinceRecognizerActivity}ms -> cancel and force reset"
+                    )
+                    safeCancelRecognizer("stale-listening-recovery", suppressClientError = true)
+                    forceResetAsrState()
+                }
+            }
+            if (isStopping) {
+                val elapsedSinceStop = now - lastStopRequestAtMs
+                if (elapsedSinceStop >= stopCompletionTimeoutMs()) {
+                    onAsrDebug?.invoke("ASR stop completion timeout reached ($elapsedSinceStop ms), force reset")
+                    safeCancelRecognizer("stop-timeout-recovery", suppressClientError = true)
+                    forceResetAsrState()
+                }
+            }
             if (isListening || isStopping) {
                 onAsrDebug?.invoke("ASR start ignored: state listening=$isListening stopping=$isStopping")
                 return@runOnMainSync false
             }
-            val now = System.currentTimeMillis()
             val elapsedSinceStop = now - lastStopRequestAtMs
             if (elapsedSinceStop in 0 until stopToStartCooldownMs) {
                 onAsrDebug?.invoke(
@@ -202,12 +240,6 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 return@runOnMainSync false
             }
             onAsrDebug?.invoke("ASR audio route: ${buildAudioRouteSnapshot()}")
-            val recognizer = speechRecognizer
-            if (recognizer == null) {
-                onAsrDebug?.invoke("ASR unavailable on device")
-                onAsrError?.invoke(ERROR_SERVICE_UNAVAILABLE, context.getString(R.string.asr_error_service_unavailable))
-                return@runOnMainSync false
-            }
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
@@ -221,16 +253,19 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L)
             }
             runCatching {
+                cancelPendingStopCompletionTimeout()
                 recognizer.startListening(intent)
                 isListening = true
                 isStopping = false
                 suppressNextClientError = false
+                lastStartRequestAtMs = now
+                lastRecognizerCallbackAtMs = now
+                scheduleListeningStaleTimeout(anchorStartAtMs = now)
                 onAsrDebug?.invoke("ASR startListening")
                 true
             }.onFailure {
-                isListening = false
-                isStopping = false
-                suppressNextClientError = false
+                safeCancelRecognizer("start-failure", suppressClientError = true)
+                forceResetAsrState()
                 onAsrDebug?.invoke("ASR startListening failed: ${it.message ?: "unknown"}")
                 onAsrError?.invoke(
                     ERROR_START_LISTENING_FAILED,
@@ -243,15 +278,24 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     override fun stopListening() {
         runOnMainSync(defaultValue = Unit) {
             if (!isListening && !isStopping) return@runOnMainSync Unit
-            val recognizer = speechRecognizer ?: return@runOnMainSync Unit
+            val recognizer = speechRecognizer
+            if (recognizer == null) {
+                onAsrDebug?.invoke("ASR stop ignored: recognizer unavailable, force state reset")
+                forceResetAsrState()
+                return@runOnMainSync Unit
+            }
             suppressNextClientError = true
             isStopping = true
             lastStopRequestAtMs = System.currentTimeMillis()
             onAsrDebug?.invoke("ASR stopListening by app")
+            cancelPendingListeningStaleTimeout()
+            scheduleStopCompletionTimeout()
             runCatching {
                 recognizer.stopListening()
             }.onFailure {
-                isStopping = false
+                onAsrDebug?.invoke("ASR stopListening failed: ${it.message ?: "unknown"}, force state reset")
+                safeCancelRecognizer("stop-failure", suppressClientError = true)
+                forceResetAsrState()
             }
         }
     }
@@ -299,6 +343,8 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             isListening = false
             isStopping = false
             suppressNextClientError = true
+            cancelPendingListeningStaleTimeout()
+            cancelPendingStopCompletionTimeout()
             val recognizer = speechRecognizer
             try {
                 recognizer?.stopListening()
@@ -362,6 +408,97 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         }
         ttsHasAudioFocus = false
         onAsrDebug?.invoke("TTS audio focus abandoned")
+    }
+
+    private fun scheduleStopCompletionTimeout() {
+        cancelPendingStopCompletionTimeout()
+        val stopRequestedAtMs = lastStopRequestAtMs
+        val timeoutMs = stopCompletionTimeoutMs()
+        val runnable = Runnable {
+            if (isReleased) return@Runnable
+            if (!isStopping) return@Runnable
+            if (lastStopRequestAtMs != stopRequestedAtMs) return@Runnable
+            onAsrDebug?.invoke("ASR stop timeout ${timeoutMs}ms -> force state reset")
+            safeCancelRecognizer("stop-timeout", suppressClientError = true)
+            forceResetAsrState()
+        }
+        stopCompletionTimeoutRunnable = runnable
+        mainHandler.postDelayed(runnable, timeoutMs)
+    }
+
+    private fun cancelPendingStopCompletionTimeout() {
+        val runnable = stopCompletionTimeoutRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        stopCompletionTimeoutRunnable = null
+    }
+
+    private fun scheduleListeningStaleTimeout(anchorStartAtMs: Long) {
+        cancelPendingListeningStaleTimeout()
+        val runnable = Runnable {
+            if (isReleased) return@Runnable
+            if (!isListening || isStopping) return@Runnable
+            if (lastStartRequestAtMs != anchorStartAtMs) return@Runnable
+            val now = System.currentTimeMillis()
+            val aliveAt = maxOf(lastStartRequestAtMs, lastRecognizerCallbackAtMs)
+            val elapsed = now - aliveAt
+            if (aliveAt > 0 && elapsed < LISTENING_STALE_TIMEOUT_MS) {
+                val nextRunnable = listeningStaleTimeoutRunnable
+                if (nextRunnable != null) {
+                    mainHandler.postDelayed(nextRunnable, LISTENING_STALE_TIMEOUT_MS - elapsed)
+                }
+                return@Runnable
+            }
+            onAsrDebug?.invoke("ASR listening timeout ${elapsed}ms -> cancel and emit speech timeout")
+            safeCancelRecognizer("listening-timeout", suppressClientError = true)
+            forceResetAsrState()
+            onAsrError?.invoke(
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
+                mapAsrError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+            )
+        }
+        listeningStaleTimeoutRunnable = runnable
+        mainHandler.postDelayed(runnable, LISTENING_STALE_TIMEOUT_MS)
+    }
+
+    private fun cancelPendingListeningStaleTimeout() {
+        val runnable = listeningStaleTimeoutRunnable ?: return
+        mainHandler.removeCallbacks(runnable)
+        listeningStaleTimeoutRunnable = null
+    }
+
+    private fun stopCompletionTimeoutMs(): Long {
+        return (stopToStartCooldownMs + STOP_COMPLETION_TIMEOUT_BUFFER_MS).coerceIn(
+            MIN_STOP_COMPLETION_TIMEOUT_MS,
+            MAX_STOP_COMPLETION_TIMEOUT_MS
+        )
+    }
+
+    private fun forceResetAsrState() {
+        cancelPendingListeningStaleTimeout()
+        cancelPendingStopCompletionTimeout()
+        isListening = false
+        isStopping = false
+        suppressNextClientError = false
+        lastStartRequestAtMs = 0L
+        lastRecognizerCallbackAtMs = 0L
+    }
+
+    private fun touchRecognizerCallbackClock() {
+        lastRecognizerCallbackAtMs = System.currentTimeMillis()
+        if (isListening && !isStopping && lastStartRequestAtMs > 0L) {
+            scheduleListeningStaleTimeout(anchorStartAtMs = lastStartRequestAtMs)
+        }
+    }
+
+    private fun safeCancelRecognizer(reason: String, suppressClientError: Boolean = false) {
+        val recognizer = speechRecognizer ?: return
+        runCatching {
+            if (suppressClientError) {
+                suppressNextClientError = true
+            }
+            recognizer.cancel()
+            onAsrDebug?.invoke("ASR recognizer cancel by $reason")
+        }
     }
 
     private fun buildAudioRouteSnapshot(): String {

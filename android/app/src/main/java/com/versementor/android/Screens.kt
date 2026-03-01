@@ -17,10 +17,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
@@ -254,6 +256,7 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
 @Composable
 fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     val settings = viewModel.settings
+    val scrollState = rememberScrollState()
     var expanded by remember { mutableStateOf(false) }
     var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
     var ttlError by remember { mutableStateOf(false) }
@@ -287,7 +290,13 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
         stopStartCooldownError = false
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(text = stringResource(id = R.string.settings), style = MaterialTheme.typography.headlineSmall)
             Button(onClick = onBack) { Text(text = stringResource(id = R.string.back)) }

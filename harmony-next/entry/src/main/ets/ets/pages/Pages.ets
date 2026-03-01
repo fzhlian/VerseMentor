@@ -10,10 +10,109 @@ import {
   getDemoSharedCoreDelegateMode,
   isDemoSharedCoreDelegateEnabled
 } from '../shared/shared_core_delegate_demo'
-import type { IMockSpeechIO, MockAsrScriptStep, SpeechAsrError } from '../shared/speech'
+import type {
+  BargeInMode,
+  IMockSpeechIO,
+  MockAsrScriptStep,
+  SpeechAsrError,
+  SpeechDiagnostics,
+  SpeechProviderId
+} from '../shared/speech'
 
 const SETTINGS_KEY = 'vm.shell.settings'
 type DelegateMode = 'off' | 'normal' | 'invalid-json' | 'invalid-actions' | 'invalid-state'
+
+interface ShellSettings {
+  followSystem: boolean
+  toneRemind: boolean
+  variantsEnable: boolean
+  speechProviderId: SpeechProviderId
+  allowListeningDuringSpeaking: boolean
+  bargeInMode: BargeInMode
+  duckVolume: number
+  enableEchoCancellation: boolean
+  enableNoiseSuppression: boolean
+}
+
+const DEFAULT_SHELL_SETTINGS: ShellSettings = {
+  followSystem: true,
+  toneRemind: true,
+  variantsEnable: true,
+  speechProviderId: 'iflytek',
+  allowListeningDuringSpeaking: true,
+  bargeInMode: 'stop_tts_on_speech',
+  duckVolume: 0.4,
+  enableEchoCancellation: true,
+  enableNoiseSuppression: true
+}
+
+function clamp01(value: number): number {
+  if (value < 0) return 0
+  if (value > 1) return 1
+  return value
+}
+
+function normalizeProviderId(raw: unknown): SpeechProviderId {
+  if (raw === 'volc' || raw === 'volcengine') {
+    return 'volc'
+  }
+  return 'iflytek'
+}
+
+function normalizeBargeInMode(raw: unknown): BargeInMode {
+  switch (raw) {
+    case 'none':
+    case 'duck_tts':
+    case 'stop_tts_on_speech':
+      return raw
+    default:
+      return 'stop_tts_on_speech'
+  }
+}
+
+function parseShellSettings(raw: string | null): ShellSettings {
+  if (raw === null) {
+    return { ...DEFAULT_SHELL_SETTINGS }
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      followSystem:
+        typeof parsed.followSystem === 'boolean'
+          ? parsed.followSystem
+          : DEFAULT_SHELL_SETTINGS.followSystem,
+      toneRemind:
+        typeof parsed.toneRemind === 'boolean'
+          ? parsed.toneRemind
+          : DEFAULT_SHELL_SETTINGS.toneRemind,
+      variantsEnable:
+        typeof parsed.variantsEnable === 'boolean'
+          ? parsed.variantsEnable
+          : DEFAULT_SHELL_SETTINGS.variantsEnable,
+      speechProviderId: normalizeProviderId(parsed.speechProviderId),
+      allowListeningDuringSpeaking:
+        typeof parsed.allowListeningDuringSpeaking === 'boolean'
+          ? parsed.allowListeningDuringSpeaking
+          : DEFAULT_SHELL_SETTINGS.allowListeningDuringSpeaking,
+      bargeInMode: normalizeBargeInMode(parsed.bargeInMode),
+      duckVolume:
+        typeof parsed.duckVolume === 'number'
+          ? clamp01(parsed.duckVolume)
+          : DEFAULT_SHELL_SETTINGS.duckVolume,
+      enableEchoCancellation:
+        typeof parsed.enableEchoCancellation === 'boolean'
+          ? parsed.enableEchoCancellation
+          : DEFAULT_SHELL_SETTINGS.enableEchoCancellation,
+      enableNoiseSuppression:
+        typeof parsed.enableNoiseSuppression === 'boolean'
+          ? parsed.enableNoiseSuppression
+          : DEFAULT_SHELL_SETTINGS.enableNoiseSuppression
+    }
+  } catch (_err) {
+    return { ...DEFAULT_SHELL_SETTINGS }
+  }
+}
 
 @Component
 struct HomePage {
@@ -60,11 +159,24 @@ struct SessionPage {
   @State lastSpoken: string = '-'
   @State lastReply: string = '-'
   @State voices: string = 'loading...'
+  @State speechProviderId: SpeechProviderId = DEFAULT_SHELL_SETTINGS.speechProviderId
+  @State allowListeningDuringSpeaking: boolean = DEFAULT_SHELL_SETTINGS.allowListeningDuringSpeaking
+  @State bargeInMode: BargeInMode = DEFAULT_SHELL_SETTINGS.bargeInMode
+  @State duckVolume: number = DEFAULT_SHELL_SETTINGS.duckVolume
+  @State enableEchoCancellation: boolean = DEFAULT_SHELL_SETTINGS.enableEchoCancellation
+  @State enableNoiseSuppression: boolean = DEFAULT_SHELL_SETTINGS.enableNoiseSuppression
+  @State diagProviderName: string = 'iFlytek'
+  @State diagAsrReady: boolean = false
+  @State diagTtsReady: boolean = true
+  @State diagLastError: string = '-'
+  @State micPermissionStatus: string = 'unknown'
 
   private speech: IMockSpeechIO = new HarmonySpeechIO()
   private controller: SessionShellController = new SessionShellController()
+  private store: PreferenceKVStore = new PreferenceKVStore()
 
   aboutToAppear() {
+    this.loadSpeechSettings()
     this.speech.onAsrResult((result) => {
       this.dispatchEvent({
         type: 'USER_ASR',
@@ -80,9 +192,10 @@ struct SessionPage {
     this.speech.onSpeakingStateChange((speaking) => {
       this.onSpeakingStateChanged(speaking)
     })
-    this.speech.listVoices().then((list) => {
-      this.voices = list.map((v) => v.name).join(', ')
+    this.speech.onDiagnosticsChange((diagnostics) => {
+      this.applySpeechDiagnostics(diagnostics)
     })
+    this.refreshVoices()
     this.speech.onMockScriptStateChange((running, pendingTimers) => {
       this.onAutoScriptStateChanged(running, pendingTimers)
     })
@@ -114,10 +227,67 @@ struct SessionPage {
     this.speech.stopSpeak()
   }
 
+  private loadSpeechSettings() {
+    this.store.get(SETTINGS_KEY).then((raw) => {
+      const settings = parseShellSettings(raw)
+      this.speechProviderId = settings.speechProviderId
+      this.allowListeningDuringSpeaking = settings.allowListeningDuringSpeaking
+      this.bargeInMode = settings.bargeInMode
+      this.duckVolume = settings.duckVolume
+      this.enableEchoCancellation = settings.enableEchoCancellation
+      this.enableNoiseSuppression = settings.enableNoiseSuppression
+      this.speech.setActiveProvider(this.speechProviderId)
+      this.speech.configureDuplex({
+        allowListeningDuringSpeaking: this.allowListeningDuringSpeaking,
+        bargeInMode: this.bargeInMode,
+        duckVolume: this.duckVolume,
+        audioProcessing: {
+          echoCancellation: this.enableEchoCancellation,
+          noiseSuppression: this.enableNoiseSuppression
+        }
+      })
+      this.refreshVoices()
+      this.refreshSpeechDebug()
+    })
+  }
+
+  private refreshVoices() {
+    this.speech.listVoices().then((list) => {
+      this.voices = list.map((v) => v.name).join(', ')
+    }).catch((_err) => {
+      this.voices = 'voice list unavailable'
+    })
+  }
+
+  private applySpeechDiagnostics(diagnostics: SpeechDiagnostics) {
+    this.diagProviderName = diagnostics.providerName
+    this.diagAsrReady = diagnostics.asrReady
+    this.diagTtsReady = diagnostics.ttsReady
+    this.diagLastError = diagnostics.lastError.length > 0 ? diagnostics.lastError : '-'
+    this.micPermissionStatus = diagnostics.micPermissionStatus
+  }
+
+  private buildListenOptions() {
+    return {
+      locale: 'zh-CN',
+      partialResults: true,
+      providerId: this.speechProviderId,
+      duplex: {
+        allowListeningDuringSpeaking: this.allowListeningDuringSpeaking,
+        bargeInMode: this.bargeInMode,
+        duckVolume: this.duckVolume,
+        audioProcessing: {
+          echoCancellation: this.enableEchoCancellation,
+          noiseSuppression: this.enableNoiseSuppression
+        }
+      }
+    }
+  }
+
   private startListening() {
     const dbg = this.speech.getDebugState()
     if (!dbg.listening) {
-      this.speech.startListening({ locale: 'zh-CN', partialResults: true })
+      this.speech.startListening(this.buildListenOptions())
     }
     this.listening = true
     this.status = 'Listening'
@@ -342,6 +512,7 @@ struct SessionPage {
     this.speaking = dbg.speaking
     this.autoScriptRunning = dbg.mockScriptRunning
     this.autoScriptPendingTimers = dbg.pendingScriptTimers
+    this.applySpeechDiagnostics(this.speech.getDiagnostics())
     if (this.speaking && (this.status === 'Idle' || this.status === 'Listening' || this.status === 'Speaking')) {
       this.status = 'Speaking'
       return
@@ -535,7 +706,10 @@ struct SessionPage {
     actions.forEach((action) => {
       switch (action.type) {
         case 'SPEAK':
-          this.speech.speak(action.text, { voiceId: 'zh_female_default' })
+          this.speech.speak(action.text, {
+            voiceId: 'zh_female_default',
+            providerId: this.speechProviderId
+          })
           this.lastSpoken = action.text
           this.status = 'Speaking'
           break
@@ -582,6 +756,14 @@ struct SessionPage {
       Text(`Expected line: ${this.expectedLine}`).fontSize(12)
       Text(`Speaking: ${this.speaking}`).fontSize(12)
       Text(`Voices: ${this.voices}`).fontSize(12)
+      Text(`Speech provider: ${this.speechProviderId}`).fontSize(12)
+      Text(`Duplex: allow=${this.allowListeningDuringSpeaking}, barge=${this.bargeInMode}, duck=${this.duckVolume.toFixed(2)}`).fontSize(12)
+      Text(`Audio: aec=${this.enableEchoCancellation}, ns=${this.enableNoiseSuppression}`).fontSize(12)
+      Text(`Diag provider: ${this.diagProviderName}`).fontSize(12)
+      Text(`Diag asrReady: ${this.diagAsrReady}`).fontSize(12)
+      Text(`Diag ttsReady: ${this.diagTtsReady}`).fontSize(12)
+      Text(`Diag lastError: ${this.diagLastError}`).fontSize(12)
+      Text(`Mic permission: ${this.micPermissionStatus}`).fontSize(12)
       Text(`Last ASR error: ${this.lastAsrError}`).fontSize(12)
       Text(`Last heard: ${this.lastHeard}`).fontSize(12)
       Text(`Last reply: ${this.lastReply}`).fontSize(12)
@@ -650,31 +832,29 @@ struct SettingsPage {
   @State followSystem: boolean = true
   @State toneRemind: boolean = true
   @State variantsEnable: boolean = true
+  @State speechProviderId: SpeechProviderId = DEFAULT_SHELL_SETTINGS.speechProviderId
+  @State allowListeningDuringSpeaking: boolean = DEFAULT_SHELL_SETTINGS.allowListeningDuringSpeaking
+  @State bargeInMode: BargeInMode = DEFAULT_SHELL_SETTINGS.bargeInMode
+  @State duckVolume: number = DEFAULT_SHELL_SETTINGS.duckVolume
+  @State enableEchoCancellation: boolean = DEFAULT_SHELL_SETTINGS.enableEchoCancellation
+  @State enableNoiseSuppression: boolean = DEFAULT_SHELL_SETTINGS.enableNoiseSuppression
   @State saveStatus: string = 'Loading'
 
   private store: PreferenceKVStore = new PreferenceKVStore()
 
   aboutToAppear() {
     this.store.get(SETTINGS_KEY).then((raw) => {
-      if (raw === null) {
-        this.saveStatus = 'Using defaults'
-        return
-      }
-      try {
-        const parsed = JSON.parse(raw)
-        if (typeof parsed.followSystem === 'boolean') {
-          this.followSystem = parsed.followSystem
-        }
-        if (typeof parsed.toneRemind === 'boolean') {
-          this.toneRemind = parsed.toneRemind
-        }
-        if (typeof parsed.variantsEnable === 'boolean') {
-          this.variantsEnable = parsed.variantsEnable
-        }
-        this.saveStatus = 'Loaded'
-      } catch (_err) {
-        this.saveStatus = 'Invalid saved data'
-      }
+      const parsed = parseShellSettings(raw)
+      this.followSystem = parsed.followSystem
+      this.toneRemind = parsed.toneRemind
+      this.variantsEnable = parsed.variantsEnable
+      this.speechProviderId = parsed.speechProviderId
+      this.allowListeningDuringSpeaking = parsed.allowListeningDuringSpeaking
+      this.bargeInMode = parsed.bargeInMode
+      this.duckVolume = parsed.duckVolume
+      this.enableEchoCancellation = parsed.enableEchoCancellation
+      this.enableNoiseSuppression = parsed.enableNoiseSuppression
+      this.saveStatus = raw === null ? 'Using defaults' : 'Loaded'
     })
   }
 
@@ -682,7 +862,13 @@ struct SettingsPage {
     const raw = JSON.stringify({
       followSystem: this.followSystem,
       toneRemind: this.toneRemind,
-      variantsEnable: this.variantsEnable
+      variantsEnable: this.variantsEnable,
+      speechProviderId: this.speechProviderId,
+      allowListeningDuringSpeaking: this.allowListeningDuringSpeaking,
+      bargeInMode: this.bargeInMode,
+      duckVolume: clamp01(this.duckVolume),
+      enableEchoCancellation: this.enableEchoCancellation,
+      enableNoiseSuppression: this.enableNoiseSuppression
     })
     this.store.set(SETTINGS_KEY, raw).then(() => {
       this.saveStatus = 'Saved'
@@ -706,10 +892,46 @@ struct SettingsPage {
     this.persistSettings()
   }
 
+  private setSpeechProviderId(providerId: SpeechProviderId) {
+    this.speechProviderId = providerId
+    this.persistSettings()
+  }
+
+  private setAllowListeningDuringSpeaking(value: boolean) {
+    this.allowListeningDuringSpeaking = value
+    this.persistSettings()
+  }
+
+  private setBargeInMode(value: BargeInMode) {
+    this.bargeInMode = value
+    this.persistSettings()
+  }
+
+  private setDuckVolume(value: number) {
+    this.duckVolume = clamp01(value)
+    this.persistSettings()
+  }
+
+  private setEchoCancellation(value: boolean) {
+    this.enableEchoCancellation = value
+    this.persistSettings()
+  }
+
+  private setNoiseSuppression(value: boolean) {
+    this.enableNoiseSuppression = value
+    this.persistSettings()
+  }
+
   private resetSettings() {
-    this.followSystem = true
-    this.toneRemind = true
-    this.variantsEnable = true
+    this.followSystem = DEFAULT_SHELL_SETTINGS.followSystem
+    this.toneRemind = DEFAULT_SHELL_SETTINGS.toneRemind
+    this.variantsEnable = DEFAULT_SHELL_SETTINGS.variantsEnable
+    this.speechProviderId = DEFAULT_SHELL_SETTINGS.speechProviderId
+    this.allowListeningDuringSpeaking = DEFAULT_SHELL_SETTINGS.allowListeningDuringSpeaking
+    this.bargeInMode = DEFAULT_SHELL_SETTINGS.bargeInMode
+    this.duckVolume = DEFAULT_SHELL_SETTINGS.duckVolume
+    this.enableEchoCancellation = DEFAULT_SHELL_SETTINGS.enableEchoCancellation
+    this.enableNoiseSuppression = DEFAULT_SHELL_SETTINGS.enableNoiseSuppression
     this.persistSettings()
   }
 
@@ -729,6 +951,47 @@ struct SettingsPage {
       Row({ space: 8 }) {
         Text('Variants Online')
         Toggle({ type: ToggleType.Switch, isOn: this.variantsEnable }).onChange((v: boolean) => this.setVariantsEnable(v))
+      }
+      Row({ space: 8 }) {
+        Text('Speech Provider')
+        Button('iFlytek').onClick(() => this.setSpeechProviderId('iflytek'))
+        Button('Volcengine').onClick(() => this.setSpeechProviderId('volc'))
+      }
+      Text(`Selected provider: ${this.speechProviderId}`).fontSize(12)
+      Row({ space: 8 }) {
+        Text('Listen while speaking')
+        Toggle({
+          type: ToggleType.Switch,
+          isOn: this.allowListeningDuringSpeaking
+        }).onChange((v: boolean) => this.setAllowListeningDuringSpeaking(v))
+      }
+      Row({ space: 8 }) {
+        Text('Barge mode')
+        Button('None').onClick(() => this.setBargeInMode('none'))
+        Button('Duck').onClick(() => this.setBargeInMode('duck_tts'))
+        Button('Stop').onClick(() => this.setBargeInMode('stop_tts_on_speech'))
+      }
+      Text(`Barge mode selected: ${this.bargeInMode}`).fontSize(12)
+      Text(`Duck volume: ${this.duckVolume.toFixed(2)}`).fontSize(12)
+      Slider({
+        value: this.duckVolume,
+        min: 0,
+        max: 1,
+        step: 0.05
+      }).onChange((v: number) => this.setDuckVolume(v))
+      Row({ space: 8 }) {
+        Text('Echo cancellation')
+        Toggle({
+          type: ToggleType.Switch,
+          isOn: this.enableEchoCancellation
+        }).onChange((v: boolean) => this.setEchoCancellation(v))
+      }
+      Row({ space: 8 }) {
+        Text('Noise suppression')
+        Toggle({
+          type: ToggleType.Switch,
+          isOn: this.enableNoiseSuppression
+        }).onChange((v: boolean) => this.setNoiseSuppression(v))
       }
       Button('Reset Defaults').onClick(() => this.resetSettings())
       Button('Back').onClick(() => this.onBack())

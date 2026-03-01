@@ -1,6 +1,7 @@
 ﻿package com.versementor.android.speech
 
 import android.Manifest
+import android.content.ComponentName
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
@@ -15,10 +16,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.versementor.android.R
 import com.versementor.android.VoiceOption
@@ -34,7 +37,7 @@ interface ISpeechIO {
     var onAsrDebug: ((String) -> Unit)?
     var onSpeaking: ((Boolean) -> Unit)?
     fun startListening(): Boolean
-    fun stopListening()
+    fun stopListening(reason: String = "app")
     fun setStopToStartCooldownMs(cooldownMs: Int)
     fun speak(text: String, voiceId: String?)
     fun stopSpeak()
@@ -87,6 +90,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var consecutiveListeningStaleTimeouts = 0
     private var suppressNextClientError = false
     private var isReleased = false
+    private var lastEngineSnapshot: String? = null
     override var onAsrResult: ((String, Boolean, Float?) -> Unit)? = null
     override var onAsrError: ((Int, String) -> Unit)? = null
     override var onAsrDebug: ((String) -> Unit)? = null
@@ -141,6 +145,9 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                     return
                 }
                 val confidence = bundle.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)?.firstOrNull()
+                onAsrDebug?.invoke(
+                    "ASR final result text=\"${text.toSingleLineLog()}\" confidence=${formatConfidence(confidence)} alternatives=${list?.size ?: 0}"
+                )
                 onAsrResult?.invoke(text, true, confidence)
             }
             override fun onPartialResults(partialResults: Bundle?) {
@@ -250,6 +257,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 )
                 return@runOnMainSync false
             }
+            logRecognizerEngineSnapshot("start")
             onAsrDebug?.invoke("ASR audio route: ${buildAudioRouteSnapshot()}")
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -263,6 +271,9 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L)
             }
+            onAsrDebug?.invoke(
+                "ASR intent config: lang=zh-CN,partial=true,max=3,preferOffline=false,min=1500,possiblySilence=1200,completeSilence=1800"
+            )
             runCatching {
                 cancelPendingStopCompletionTimeout()
                 recognizer.startListening(intent)
@@ -287,12 +298,17 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         }
     }
 
-    override fun stopListening() {
+    override fun stopListening(reason: String) {
         runOnMainSync(defaultValue = Unit) {
-            if (!isListening && !isStopping) return@runOnMainSync Unit
+            if (!isListening && !isStopping) {
+                onAsrDebug?.invoke(
+                    "ASR stop ignored by $reason: state listening=$isListening stopping=$isStopping"
+                )
+                return@runOnMainSync Unit
+            }
             val recognizer = speechRecognizer
             if (recognizer == null) {
-                onAsrDebug?.invoke("ASR stop ignored: recognizer unavailable, force state reset")
+                onAsrDebug?.invoke("ASR stop ignored by $reason: recognizer unavailable, force state reset")
                 forceResetAsrState()
                 return@runOnMainSync Unit
             }
@@ -301,13 +317,15 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             lastStopRequestAtMs = System.currentTimeMillis()
             consecutiveListeningStaleTimeouts = 0
             stopCaptureRecording()
-            onAsrDebug?.invoke("ASR stopListening by app")
+            onAsrDebug?.invoke("ASR stopListening by $reason")
             cancelPendingListeningStaleTimeout()
             scheduleStopCompletionTimeout()
             runCatching {
                 recognizer.stopListening()
             }.onFailure {
-                onAsrDebug?.invoke("ASR stopListening failed: ${it.message ?: "unknown"}, force state reset")
+                onAsrDebug?.invoke(
+                    "ASR stopListening failed by $reason: ${it.message ?: "unknown"}, force state reset"
+                )
                 safeCancelRecognizer("stop-failure", suppressClientError = true)
                 forceResetAsrState()
             }
@@ -683,6 +701,61 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             AudioDeviceInfo.TYPE_USB_HEADSET -> "usb_headset"
             else -> "type_$type"
         }
+    }
+
+    private fun logRecognizerEngineSnapshot(stage: String) {
+        val availableFlag = SpeechRecognizer.isRecognitionAvailable(context)
+        val defaultService = getConfiguredRecognizerService().orEmpty()
+        val availableServices = queryRecognitionServices()
+        val availableSummary = if (availableServices.isEmpty()) {
+            "none"
+        } else {
+            availableServices.joinToString("|")
+        }
+        val recognizerReady = speechRecognizer != null
+        val summary =
+            "stage=$stage,available=$availableFlag,default=$defaultService,services=$availableSummary,recognizerReady=$recognizerReady"
+        if (summary != lastEngineSnapshot || stage == "start") {
+            onAsrDebug?.invoke("ASR engine: $summary")
+            lastEngineSnapshot = summary
+        }
+        if (defaultService.isNotBlank() && availableServices.none { it == defaultService }) {
+            onAsrDebug?.invoke("ASR engine warning: default service not in query list -> $defaultService")
+        }
+    }
+
+    private fun getConfiguredRecognizerService(): String? {
+        val flattened = Settings.Secure.getString(
+            context.contentResolver,
+            "voice_recognition_service"
+        ) ?: return null
+        return runCatching {
+            ComponentName.unflattenFromString(flattened)
+        }.getOrNull()?.let { "${it.packageName}/${it.className}" } ?: flattened
+    }
+
+    private fun queryRecognitionServices(): List<String> {
+        val pm = context.packageManager
+        val intent = Intent(RecognitionService.SERVICE_INTERFACE)
+        val services = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong()))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentServices(intent, PackageManager.MATCH_ALL)
+        }
+        return services.mapNotNull { resolve ->
+            val serviceInfo = resolve.serviceInfo ?: return@mapNotNull null
+            "${serviceInfo.packageName}/${serviceInfo.name}"
+        }.distinct().sorted()
+    }
+
+    private fun String.toSingleLineLog(maxLen: Int = 80): String {
+        val normalized = replace("\n", " ").replace("\r", " ").trim()
+        return if (normalized.length <= maxLen) normalized else normalized.take(maxLen) + "..."
+    }
+
+    private fun formatConfidence(confidence: Float?): String {
+        return confidence?.let { String.format(Locale.US, "%.3f", it) } ?: "n/a"
     }
 
     private fun <T> runOnMainSync(defaultValue: T, block: () -> T): T {

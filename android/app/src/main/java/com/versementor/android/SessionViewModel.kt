@@ -1,4 +1,4 @@
-package com.versementor.android
+﻿package com.versementor.android
 
 import android.app.Application
 import android.net.Uri
@@ -144,7 +144,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     consecutiveTransientAsrErrors = 0
                     pendingStartListening = false
                     isManuallyPaused = true
-                    speech.stopListening()
+                    speech.stopListening(reason = "asr-error-infra")
                     uiState = uiState.copy(
                         sessionPaused = true,
                         awaitingSpeech = false,
@@ -159,7 +159,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     consecutiveTransientAsrErrors = 0
                     pendingStartListening = false
                     isManuallyPaused = true
-                    speech.stopListening()
+                    speech.stopListening(reason = "asr-error-permission")
                     uiState = uiState.copy(
                         sessionPaused = true,
                         awaitingSpeech = false,
@@ -312,7 +312,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                         awaitingSpeech = false,
                         logs = appendLog("TTS: ${action.text}")
                     )
-                    speech.stopListening()
+                    speech.stopListening(reason = "before-tts-speak")
                     speech.speak(action.text, settings.ttsVoiceId)
                 }
 
@@ -337,7 +337,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     pendingStartListening = false
                     consecutiveStartNotReady = 0
                     uiState = uiState.copy(awaitingSpeech = false)
-                    speech.stopListening()
+                    speech.stopListening(reason = "session-action-stop")
                 }
 
                 is SessionAction.UpdateScreenHint -> {
@@ -357,7 +357,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         transientRetryJob?.cancel()
         transientRetryJob = null
         consecutiveStartNotReady = 0
-        speech.stopListening()
+        speech.stopListening(reason = "pause-session")
         uiState = uiState.copy(
             sessionPaused = true,
             awaitingSpeech = false,
@@ -388,7 +388,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         consecutiveStartNotReady = 0
         transientRetryJob?.cancel()
         transientRetryJob = null
-        speech.stopListening()
+        speech.stopListening(reason = "stop-session")
         if (stopSpeak) {
             speech.stopSpeak()
         }
@@ -419,7 +419,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         val retryCount = consecutiveStartNotReady
         val shouldForceStop = retryCount >= START_NOT_READY_FORCE_STOP_THRESHOLD
         if (shouldForceStop) {
-            speech.stopListening()
+            speech.stopListening(reason = "start-not-ready-force-stop")
         }
         val retryLog = when {
             retryCount <= 3 -> "ASR start not ready x$retryCount, schedule retry"
@@ -985,7 +985,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             SharedCoreRuntimeHooks.clearReduceHook(token)
             sharedCoreHookToken = null
         }
-        speech.stopListening()
+        speech.stopListening(reason = "viewmodel-cleared")
         speech.stopSpeak()
         speech.release()
         super.onCleared()

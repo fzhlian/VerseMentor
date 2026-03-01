@@ -6,8 +6,11 @@ import type {
   MockAsrScriptStep,
   SpeechAsrResult,
   SpeechDebugState,
+  SpeechDuplexOptions,
   SpeechListenOptions,
   SpeakOptions,
+  SpeechProviderDescriptor,
+  SpeechProviderId,
   SpeechVoice
 } from './speech'
 
@@ -19,8 +22,46 @@ const BUILTIN_VOICES: SpeechVoice[] = [
   { id: 'zh_male_default', name: 'Chinese Male Default', locale: 'zh-CN', style: 'calm' }
 ]
 
+const BUILTIN_PROVIDERS: SpeechProviderDescriptor[] = [
+  { id: 'iflytek', displayName: 'iFlytek', supportsStreamingAsr: true },
+  { id: 'volcengine', displayName: 'Volcengine', supportsStreamingAsr: true }
+]
+
+const DEFAULT_DUPLEX_OPTIONS: SpeechDuplexOptions = {
+  allowListeningDuringSpeaking: true,
+  bargeInMode: 'stop_tts_on_speech',
+  audioProcessing: {
+    echoCancellation: true,
+    noiseSuppression: true
+  }
+}
+
 type MockScriptStateHandler = (running: boolean, pendingTimers: number) => void
 type SpeakingStateHandler = (speaking: boolean) => void
+
+function normalizeDuplexOptions(next?: SpeechDuplexOptions): SpeechDuplexOptions {
+  if (!next) {
+    return {
+      allowListeningDuringSpeaking: DEFAULT_DUPLEX_OPTIONS.allowListeningDuringSpeaking,
+      bargeInMode: DEFAULT_DUPLEX_OPTIONS.bargeInMode,
+      audioProcessing: {
+        echoCancellation: DEFAULT_DUPLEX_OPTIONS.audioProcessing?.echoCancellation,
+        noiseSuppression: DEFAULT_DUPLEX_OPTIONS.audioProcessing?.noiseSuppression
+      }
+    }
+  }
+  return {
+    allowListeningDuringSpeaking:
+      next.allowListeningDuringSpeaking ?? DEFAULT_DUPLEX_OPTIONS.allowListeningDuringSpeaking,
+    bargeInMode: next.bargeInMode ?? DEFAULT_DUPLEX_OPTIONS.bargeInMode,
+    audioProcessing: {
+      echoCancellation:
+        next.audioProcessing?.echoCancellation ?? DEFAULT_DUPLEX_OPTIONS.audioProcessing?.echoCancellation,
+      noiseSuppression:
+        next.audioProcessing?.noiseSuppression ?? DEFAULT_DUPLEX_OPTIONS.audioProcessing?.noiseSuppression
+    }
+  }
+}
 
 export class HarmonySpeechIO implements IMockSpeechIO {
   private handler?: (result: SpeechAsrResult) => void
@@ -30,6 +71,8 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   private listenOptions?: SpeechListenOptions
   private lastSpokenText = ''
   private lastVoiceId?: string
+  private activeProvider: SpeechProviderId = 'iflytek'
+  private duplexOptions: SpeechDuplexOptions = normalizeDuplexOptions()
   private mockScriptRunning = false
   private mockScriptTimerIds: number[] = []
   private mockScriptRunId = 0
@@ -39,6 +82,19 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   private speakRunId = 0
 
   startListening(options: SpeechListenOptions): void {
+    if (typeof options.providerId === 'string') {
+      this.activeProvider = options.providerId
+    }
+    if (options.duplex) {
+      this.duplexOptions = normalizeDuplexOptions(options.duplex)
+    }
+    if (this.speaking && this.duplexOptions.allowListeningDuringSpeaking === false) {
+      this.emitMockAsrError({
+        code: -8,
+        message: 'listening blocked while speaking'
+      })
+      return
+    }
     this.listenOptions = options
     this.listening = true
   }
@@ -66,7 +122,26 @@ export class HarmonySpeechIO implements IMockSpeechIO {
     this.notifyMockScriptState()
   }
 
+  setActiveProvider(providerId: SpeechProviderId): void {
+    this.activeProvider = providerId
+  }
+
+  async listProviders(): Promise<SpeechProviderDescriptor[]> {
+    return BUILTIN_PROVIDERS
+  }
+
+  configureDuplex(options: SpeechDuplexOptions): void {
+    this.duplexOptions = normalizeDuplexOptions(options)
+  }
+
   speak(text: string, options?: SpeakOptions): void {
+    if (typeof options?.providerId === 'string') {
+      this.activeProvider = options.providerId
+    }
+    if (this.listening && this.duplexOptions.allowListeningDuringSpeaking === false) {
+      this.listening = false
+    }
+
     this.lastSpokenText = text
     this.lastVoiceId = options?.voiceId
     this.clearSpeakTimer()
@@ -122,7 +197,9 @@ export class HarmonySpeechIO implements IMockSpeechIO {
     if (options.autoStartListening === true && !this.listening) {
       this.startListening({
         locale: options.locale ?? 'zh-CN',
-        partialResults: options.partialResults ?? true
+        partialResults: options.partialResults ?? true,
+        providerId: this.activeProvider,
+        duplex: this.duplexOptions
       })
     }
 
@@ -173,6 +250,11 @@ export class HarmonySpeechIO implements IMockSpeechIO {
   }
 
   emitMockAsrResult(result: SpeechAsrResult): void {
+    if (this.speaking && result.isFinal) {
+      if (this.duplexOptions.bargeInMode === 'stop_tts_on_speech') {
+        this.stopSpeak()
+      }
+    }
     if (!this.listening || !this.handler) return
     this.handler(result)
   }
@@ -192,6 +274,8 @@ export class HarmonySpeechIO implements IMockSpeechIO {
       listenOptions: this.listenOptions,
       lastSpokenText: this.lastSpokenText,
       lastVoiceId: this.lastVoiceId,
+      activeProvider: this.activeProvider,
+      duplexOptions: normalizeDuplexOptions(this.duplexOptions),
       mockScriptRunning: this.mockScriptRunning,
       pendingScriptTimers: this.mockScriptTimerIds.length
     }

@@ -23,7 +23,7 @@ enum class BargeInMode(val rawValue: String) {
     companion object {
         fun fromRaw(value: String?): BargeInMode {
             val normalized = value?.trim()?.lowercase().orEmpty()
-            return entries.firstOrNull { it.rawValue == normalized } ?: STOP_TTS_ON_SPEECH
+            return entries.firstOrNull { it.rawValue == normalized } ?: DUCK_TTS
         }
     }
 }
@@ -35,8 +35,8 @@ data class AudioProcessingOptions(
 
 data class DuplexPolicy(
     val allowListeningDuringSpeaking: Boolean = true,
-    val bargeInMode: BargeInMode = BargeInMode.STOP_TTS_ON_SPEECH,
-    val duckVolume: Float = 0.4f,
+    val bargeInMode: BargeInMode = BargeInMode.DUCK_TTS,
+    val duckVolume: Float = 0.25f,
     val audioProcessing: AudioProcessingOptions = AudioProcessingOptions()
 )
 

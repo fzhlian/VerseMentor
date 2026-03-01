@@ -71,7 +71,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private val arbiter = FullDuplexAudioArbiter(
         DuplexPolicy(
             allowListeningDuringSpeaking = true,
-            bargeInMode = BargeInMode.STOP_TTS_ON_SPEECH,
+            bargeInMode = BargeInMode.DUCK_TTS,
             audioProcessing = AudioProcessingOptions(
                 echoCancellation = true,
                 noiseSuppression = true

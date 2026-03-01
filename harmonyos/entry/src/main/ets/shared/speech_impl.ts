@@ -43,8 +43,8 @@ const BUILTIN_PROVIDERS: SpeechProviderDescriptor[] = [
 
 const DEFAULT_DUPLEX_OPTIONS: SpeechDuplexOptions = {
   allowListeningDuringSpeaking: true,
-  bargeInMode: 'stop_tts_on_speech',
-  duckVolume: 0.4,
+  bargeInMode: 'duck_tts',
+  duckVolume: 0.25,
   audioProcessing: {
     echoCancellation: true,
     noiseSuppression: true
@@ -90,7 +90,7 @@ function normalizeBargeInMode(raw: unknown): BargeInMode {
     case 'stop_tts_on_speech':
       return raw
     default:
-      return 'stop_tts_on_speech'
+      return 'duck_tts'
   }
 }
 
@@ -110,7 +110,7 @@ function normalizeDuplexOptions(next?: SpeechDuplexOptions): SpeechDuplexOptions
     allowListeningDuringSpeaking:
       next.allowListeningDuringSpeaking ?? DEFAULT_DUPLEX_OPTIONS.allowListeningDuringSpeaking,
     bargeInMode: normalizeBargeInMode(next.bargeInMode),
-    duckVolume: clamp01(next.duckVolume ?? DEFAULT_DUPLEX_OPTIONS.duckVolume ?? 0.4),
+    duckVolume: clamp01(next.duckVolume ?? DEFAULT_DUPLEX_OPTIONS.duckVolume ?? 0.25),
     audioProcessing: {
       echoCancellation:
         next.audioProcessing?.echoCancellation ??
@@ -463,7 +463,7 @@ export class HarmonySpeechIO implements IMockSpeechIO {
     }
     this.duckedTts = true
     this.duckRecoveryFrames = 0
-    const duckVolume = clamp01(this.duplexOptions.duckVolume ?? 0.4)
+    const duckVolume = clamp01(this.duplexOptions.duckVolume ?? 0.25)
     try {
       await this.output.setVolume(duckVolume)
     } catch (_err) {

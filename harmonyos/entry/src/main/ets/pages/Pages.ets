@@ -40,8 +40,8 @@ const DEFAULT_SHELL_SETTINGS: ShellSettings = {
   variantsEnable: true,
   speechProviderId: 'iflytek',
   allowListeningDuringSpeaking: true,
-  bargeInMode: 'stop_tts_on_speech',
-  duckVolume: 0.4,
+  bargeInMode: 'duck_tts',
+  duckVolume: 0.25,
   enableEchoCancellation: true,
   enableNoiseSuppression: true
 }
@@ -66,7 +66,7 @@ function normalizeBargeInMode(raw: unknown): BargeInMode {
     case 'stop_tts_on_speech':
       return raw
     default:
-      return 'stop_tts_on_speech'
+      return 'duck_tts'
   }
 }
 

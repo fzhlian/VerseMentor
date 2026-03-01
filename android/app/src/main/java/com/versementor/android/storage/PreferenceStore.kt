@@ -16,8 +16,8 @@ class PreferenceStore(context: Context) {
         val ttsVoiceName = prefs.getString("ttsVoiceName", "") ?: ""
         val speechProviderId = prefs.getString("speechProviderId", "iflytek") ?: "iflytek"
         val allowListeningDuringSpeaking = prefs.getBoolean("allowListeningDuringSpeaking", true)
-        val bargeInMode = prefs.getString("bargeInMode", "stop_tts_on_speech") ?: "stop_tts_on_speech"
-        val duckVolume = prefs.getFloat("duckVolume", 0.4f).coerceIn(0f, 1f)
+        val bargeInMode = prefs.getString("bargeInMode", "duck_tts") ?: "duck_tts"
+        val duckVolume = prefs.getFloat("duckVolume", 0.25f).coerceIn(0f, 1f)
         val enableEchoCancellation = prefs.getBoolean("enableEchoCancellation", true)
         val enableNoiseSuppression = prefs.getBoolean("enableNoiseSuppression", true)
         val toneRemind = prefs.getBoolean("toneRemind", true)

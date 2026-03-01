@@ -1,10 +1,18 @@
 package com.versementor.android.speech.providers
 
 import android.content.Context
-import com.versementor.android.speech.platform.AndroidMicrophoneCapture
+import com.versementor.android.speech.platform.AudioCaptureAndroid
+import com.versementor.android.speech.platform.AudioCaptureConfig
+import com.versementor.android.speech.platform.AudioCaptureObserver
+import com.versementor.android.speech.platform.AudioOutputAndroid
+import com.versementor.android.speech.platform.AudioOutputConfig
 import com.versementor.android.speech.platform.AndroidTtsPlayer
-import com.versementor.android.speech.platform.MicrophoneCaptureListener
-import com.versementor.android.speech.platform.MicrophoneCaptureOptions
+import com.versementor.android.speech.platform.VadState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
 
 abstract class DemoThirdPartySpeechProvider(
@@ -13,11 +21,13 @@ abstract class DemoThirdPartySpeechProvider(
     private val callbacks: SpeechProviderCallbacks,
     private val demoScript: List<String>
 ) : SpeechProvider {
-    private val microphone = AndroidMicrophoneCapture(context)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val microphone = AudioCaptureAndroid(context, scope)
+    private val output = AudioOutputAndroid(context, scope)
     private val ttsPlayer = AndroidTtsPlayer(context)
     private val scriptCursor = AtomicInteger(0)
     private var listening = false
-    private var lastRequest = SpeechListenRequest()
+    private var captureDrainJob: kotlinx.coroutines.Job? = null
 
     init {
         ttsPlayer.onDebug = { message ->
@@ -26,6 +36,15 @@ abstract class DemoThirdPartySpeechProvider(
         ttsPlayer.onSpeakingChanged = { speaking ->
             callbacks.onSpeakingChanged(speaking)
         }
+        ttsPlayer.onError = { code, message ->
+            callbacks.onSpeakError(code, message)
+        }
+        output.onDebug = { message ->
+            callbacks.onDebug("${descriptor.displayName} output: $message")
+        }
+        output.onError = { message ->
+            callbacks.onDebug("${descriptor.displayName} output error: $message")
+        }
     }
 
     override fun startListening(request: SpeechListenRequest): Boolean {
@@ -33,33 +52,35 @@ abstract class DemoThirdPartySpeechProvider(
             callbacks.onDebug("${descriptor.displayName}: start ignored, already listening")
             return false
         }
-        lastRequest = request
-        val started = microphone.start(
-            nextOptions = MicrophoneCaptureOptions(
+        val frameMs = if (request.frameMs == 40) 40 else 20
+        val stream = microphone.start(
+            config = AudioCaptureConfig(
                 sampleRateHz = 16000,
-                frameSize = 320,
-                speechStartRmsThreshold = 1050f,
-                speechEndSilenceFrames = 12,
-                echoCancellation = request.audioProcessing.echoCancellation,
-                noiseSuppression = request.audioProcessing.noiseSuppression
+                channels = 1,
+                frameMs = frameMs,
+                enableAec = request.audioProcessing.echoCancellation,
+                enableNs = request.audioProcessing.noiseSuppression,
+                vadSpeechStartLevel = 0.06f,
+                vadSpeechEndSilenceFrames = if (frameMs == 40) 6 else 12
             ),
-            nextListener = object : MicrophoneCaptureListener {
-                override fun onFrame(rms: Float) {
-                    callbacks.onSpeechDetected(rms)
+            nextObserver = object : AudioCaptureObserver {
+                override fun onVolume(level: Float) {
+                    callbacks.onSpeechDetected(level)
                 }
 
-                override fun onSpeechStart() {
-                    callbacks.onDebug("${descriptor.displayName}: speech start")
-                    callbacks.onSpeechDetected(1500f)
-                    if (!request.partialResults) return
-                    val preview = buildPreviewResult()
-                    if (preview.isNotBlank()) {
-                        callbacks.onAsrResult(preview, false, null)
+                override fun onVad(state: VadState) {
+                    if (state == VadState.SPEECH_START) {
+                        callbacks.onDebug("${descriptor.displayName}: speech start")
+                        callbacks.onSpeechStart()
+                        if (!request.partialResults) return
+                        val preview = buildPreviewResult()
+                        if (preview.isNotBlank()) {
+                            callbacks.onAsrResult(preview, false, null)
+                        }
+                        return
                     }
-                }
-
-                override fun onSpeechEnd() {
                     callbacks.onDebug("${descriptor.displayName}: speech end")
+                    callbacks.onSpeechEnd()
                     if (!listening) return
                     listening = false
                     microphone.stop()
@@ -78,13 +99,24 @@ abstract class DemoThirdPartySpeechProvider(
                 }
             }
         )
-        if (!started) {
+        if (stream == null) {
             callbacks.onDebug("${descriptor.displayName}: microphone start failed")
             return false
         }
+
         listening = true
+        captureDrainJob?.cancel()
+        captureDrainJob = scope.launch {
+            for (_ in stream) {
+                if (!listening) {
+                    break
+                }
+            }
+        }
+
+        callbacks.onAsrReady()
         callbacks.onDebug(
-            "${descriptor.displayName}: listening locale=${request.locale} partial=${request.partialResults} ec=${request.audioProcessing.echoCancellation} ns=${request.audioProcessing.noiseSuppression}"
+            "${descriptor.displayName}: listening locale=${request.locale} partial=${request.partialResults} ec=${request.audioProcessing.echoCancellation} ns=${request.audioProcessing.noiseSuppression} frameMs=$frameMs"
         )
         return true
     }
@@ -95,6 +127,8 @@ abstract class DemoThirdPartySpeechProvider(
             return
         }
         listening = false
+        captureDrainJob?.cancel()
+        captureDrainJob = null
         microphone.stop()
         callbacks.onDebug("${descriptor.displayName}: listening stopped by $reason")
     }
@@ -108,8 +142,8 @@ abstract class DemoThirdPartySpeechProvider(
         ttsPlayer.stop()
     }
 
-    override fun duckCurrentTts() {
-        ttsPlayer.duckTemporarily()
+    override fun setTtsVolume(volume: Float) {
+        ttsPlayer.setVolumeScale(volume)
     }
 
     override fun listVoices() = ttsPlayer.listVoices()
@@ -119,16 +153,40 @@ abstract class DemoThirdPartySpeechProvider(
     }
 
     override fun isCapturePlaybackActive(): Boolean {
-        return microphone.isPlaybackActive()
+        return output.isPlaying()
     }
 
     override fun playCapturedAudio(): Boolean {
-        return microphone.playCapturedAudio()
+        val data = microphone.snapshotCapturedAudio()
+        if (data.isEmpty()) {
+            return false
+        }
+        val channel = Channel<ByteArray>(capacity = Channel.BUFFERED)
+        scope.launch {
+            try {
+                var offset = 0
+                val chunkSize = 640
+                while (offset < data.size) {
+                    val end = (offset + chunkSize).coerceAtMost(data.size)
+                    channel.send(data.copyOfRange(offset, end))
+                    offset = end
+                }
+            } finally {
+                channel.close()
+            }
+        }
+        return output.playPcmStream(
+            stream = channel,
+            config = AudioOutputConfig(sampleRateHz = 16000, channels = 1)
+        )
     }
 
     override fun release() {
         listening = false
+        captureDrainJob?.cancel()
+        captureDrainJob = null
         microphone.release()
+        output.release()
         ttsPlayer.release()
     }
 

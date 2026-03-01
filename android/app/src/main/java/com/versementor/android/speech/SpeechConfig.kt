@@ -2,11 +2,14 @@ package com.versementor.android.speech
 
 enum class SpeechProviderId(val rawValue: String, val displayName: String) {
     IFLYTEK(rawValue = "iflytek", displayName = "iFlytek"),
-    VOLCENGINE(rawValue = "volcengine", displayName = "Volcengine");
+    VOLCENGINE(rawValue = "volc", displayName = "Volcengine");
 
     companion object {
         fun fromRaw(value: String?): SpeechProviderId {
-            val normalized = value?.trim()?.lowercase().orEmpty()
+            val normalized = when (value?.trim()?.lowercase().orEmpty()) {
+                "volcengine" -> "volc"
+                else -> value?.trim()?.lowercase().orEmpty()
+            }
             return entries.firstOrNull { it.rawValue == normalized } ?: IFLYTEK
         }
     }
@@ -33,6 +36,7 @@ data class AudioProcessingOptions(
 data class DuplexPolicy(
     val allowListeningDuringSpeaking: Boolean = true,
     val bargeInMode: BargeInMode = BargeInMode.STOP_TTS_ON_SPEECH,
+    val duckVolume: Float = 0.4f,
     val audioProcessing: AudioProcessingOptions = AudioProcessingOptions()
 )
 

@@ -27,6 +27,7 @@ import com.versementor.android.session.buildInitialSession
 import com.versementor.android.speech.AudioProcessingOptions
 import com.versementor.android.speech.BargeInMode
 import com.versementor.android.speech.DuplexPolicy
+import com.versementor.android.speech.SpeechProviderId
 import com.versementor.android.speech.SpeechIO
 import com.versementor.android.storage.PoemLineVariant
 import com.versementor.android.storage.PoemVariants
@@ -598,6 +599,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private fun loadSettings() {
         val loaded = prefs.loadSettings()
         val normalized = loaded.copy(
+            speechProviderId = SpeechProviderId.fromRaw(loaded.speechProviderId).rawValue,
+            duckVolume = loaded.duckVolume.coerceIn(0f, 1f),
             transientAsrPromptThreshold = loaded.transientAsrPromptThreshold.coerceIn(
                 MIN_TRANSIENT_ASR_PROMPT_THRESHOLD,
                 MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
@@ -654,12 +657,13 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setSpeechProvider(id: String) {
-        if (id == settings.speechProviderId) return
-        settings = settings.copy(speechProviderId = id)
+        val normalized = SpeechProviderId.fromRaw(id).rawValue
+        if (normalized == settings.speechProviderId) return
+        settings = settings.copy(speechProviderId = normalized)
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
         refreshVoices()
-        uiState = uiState.copy(logs = appendLog("ASR debug: provider -> $id"))
+        uiState = uiState.copy(logs = appendLog("ASR debug: provider -> $normalized"))
     }
 
     fun setAllowListeningDuringSpeaking(enabled: Boolean) {
@@ -676,6 +680,15 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         prefs.saveSettings(settings)
         applySpeechRuntimeConfig()
         uiState = uiState.copy(logs = appendLog("ASR debug: bargeInMode -> $mode"))
+    }
+
+    fun setDuckVolume(volume: Float) {
+        val normalized = volume.coerceIn(0f, 1f)
+        if (kotlin.math.abs(normalized - settings.duckVolume) < 0.001f) return
+        settings = settings.copy(duckVolume = normalized)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        uiState = uiState.copy(logs = appendLog("ASR debug: duckVolume -> %.2f".format(normalized)))
     }
 
     fun setEchoCancellationEnabled(enabled: Boolean) {
@@ -1040,6 +1053,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             DuplexPolicy(
                 allowListeningDuringSpeaking = source.allowListeningDuringSpeaking,
                 bargeInMode = BargeInMode.fromRaw(source.bargeInMode),
+                duckVolume = source.duckVolume.coerceIn(0f, 1f),
                 audioProcessing = AudioProcessingOptions(
                     echoCancellation = source.enableEchoCancellation,
                     noiseSuppression = source.enableNoiseSuppression

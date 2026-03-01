@@ -13,6 +13,8 @@ data class SpeakingTransitionDecision(
 data class BargeInDecision(
     val duckTts: Boolean,
     val stopTts: Boolean,
+    val duckVolume: Float? = null,
+    val restoreVolume: Boolean = false,
     val reason: String
 )
 
@@ -21,6 +23,7 @@ class FullDuplexAudioArbiter(
 ) {
     private var listening = false
     private var speaking = false
+    private var currentDuck = 1f
     private var policy: DuplexPolicy = policy
 
     fun updatePolicy(next: DuplexPolicy) {
@@ -66,6 +69,7 @@ class FullDuplexAudioArbiter(
 
     fun onSpeakingStopped() {
         speaking = false
+        currentDuck = 1f
     }
 
     fun onSpeechDetected(): BargeInDecision {
@@ -73,6 +77,8 @@ class FullDuplexAudioArbiter(
             return BargeInDecision(
                 duckTts = false,
                 stopTts = false,
+                duckVolume = null,
+                restoreVolume = false,
                 reason = "ignored-not-speaking"
             )
         }
@@ -80,20 +86,63 @@ class FullDuplexAudioArbiter(
             BargeInMode.NONE -> BargeInDecision(
                 duckTts = false,
                 stopTts = false,
+                duckVolume = null,
+                restoreVolume = false,
                 reason = "barge-in-disabled"
             )
 
             BargeInMode.DUCK_TTS -> BargeInDecision(
                 duckTts = true,
                 stopTts = false,
+                duckVolume = policy.duckVolume.coerceIn(0f, 1f),
+                restoreVolume = false,
                 reason = "barge-in-duck"
             )
 
             BargeInMode.STOP_TTS_ON_SPEECH -> BargeInDecision(
                 duckTts = false,
                 stopTts = true,
+                duckVolume = null,
+                restoreVolume = false,
                 reason = "barge-in-stop-tts"
             )
         }
+    }
+
+    fun onSpeechStartDetected(): BargeInDecision {
+        return onSpeechDetected()
+    }
+
+    fun onSpeechEndDetected(): BargeInDecision {
+        if (!speaking || policy.bargeInMode != BargeInMode.DUCK_TTS) {
+            return BargeInDecision(
+                duckTts = false,
+                stopTts = false,
+                duckVolume = null,
+                restoreVolume = false,
+                reason = "speech-end-ignored"
+            )
+        }
+        if (currentDuck >= 0.99f) {
+            return BargeInDecision(
+                duckTts = false,
+                stopTts = false,
+                duckVolume = null,
+                restoreVolume = false,
+                reason = "duck-not-applied"
+            )
+        }
+        currentDuck = 1f
+        return BargeInDecision(
+            duckTts = false,
+            stopTts = false,
+            duckVolume = 1f,
+            restoreVolume = true,
+            reason = "speech-end-restore-tts"
+        )
+    }
+
+    fun onDuckApplied(volume: Float) {
+        currentDuck = volume.coerceIn(0f, 1f)
     }
 }

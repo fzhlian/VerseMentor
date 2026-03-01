@@ -36,6 +36,7 @@
     <string name="speech_barge_none">None</string>
     <string name="speech_barge_duck">Duck TTS</string>
     <string name="speech_barge_stop">Stop TTS on speech</string>
+    <string name="speech_duck_volume">Duck volume: %1$.2f</string>
     <string name="speech_echo_cancellation">Echo cancellation</string>
     <string name="speech_noise_suppression">Noise suppression</string>
     <string name="tts_voice">TTS Voice</string>

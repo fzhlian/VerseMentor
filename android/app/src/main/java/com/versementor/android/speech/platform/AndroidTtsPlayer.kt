@@ -22,11 +22,15 @@ class AndroidTtsPlayer(private val context: Context) {
     private var duckResetRunnable: Runnable? = null
     private var ducked = false
     private var duckBaseVolume = -1
+    private var manualVolumeScale = 1f
+    private var manualBaseVolume = -1
+    private var manualScaled = false
     private var ready = false
     private var released = false
     private var tts: TextToSpeech? = null
 
     var onSpeakingChanged: ((Boolean) -> Unit)? = null
+    var onError: ((Int, String) -> Unit)? = null
     var onDebug: ((String) -> Unit)? = null
 
     init {
@@ -45,7 +49,7 @@ class AndroidTtsPlayer(private val context: Context) {
 
                 override fun onDone(utteranceId: String?) {
                     if (released) return
-                    restoreVolumeIfNeeded()
+                    restoreOutputVolumeIfNeeded()
                     abandonAudioFocus()
                     onSpeakingChanged?.invoke(false)
                 }
@@ -53,15 +57,17 @@ class AndroidTtsPlayer(private val context: Context) {
                 @Deprecated("Deprecated callback")
                 override fun onError(utteranceId: String?) {
                     if (released) return
-                    restoreVolumeIfNeeded()
+                    restoreOutputVolumeIfNeeded()
                     abandonAudioFocus()
+                    onError?.invoke(-1, "utterance playback error")
                     onSpeakingChanged?.invoke(false)
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
                     if (released) return
-                    restoreVolumeIfNeeded()
+                    restoreOutputVolumeIfNeeded()
                     abandonAudioFocus()
+                    onError?.invoke(errorCode, "utterance playback error=$errorCode")
                     onSpeakingChanged?.invoke(false)
                 }
             })
@@ -90,7 +96,7 @@ class AndroidTtsPlayer(private val context: Context) {
 
     fun stop() {
         tts?.stop()
-        restoreVolumeIfNeeded()
+        restoreOutputVolumeIfNeeded()
         abandonAudioFocus()
     }
 
@@ -113,6 +119,28 @@ class AndroidTtsPlayer(private val context: Context) {
         scheduleDuckReset(durationMs)
     }
 
+    fun setVolumeScale(scale: Float) {
+        val am = audioManager ?: return
+        val clamped = scale.coerceIn(0f, 1f)
+        if (clamped >= 0.99f) {
+            restoreManualVolumeIfNeeded()
+            return
+        }
+        val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        if (!manualScaled) {
+            manualBaseVolume = when {
+                duckBaseVolume > 0 -> duckBaseVolume
+                current > 0 -> current
+                else -> 1
+            }
+        }
+        val target = (manualBaseVolume * clamped).toInt().coerceAtLeast(1)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+        manualScaled = true
+        manualVolumeScale = clamped
+        onDebug?.invoke("TTS volume scale -> %.2f (stream=%d)".format(clamped, target))
+    }
+
     fun listVoices(): List<VoiceOption> {
         val voices = tts?.voices?.filter { it.locale.language.startsWith("zh") } ?: emptySet()
         return voices.map { VoiceOption(it.name, it.name) }
@@ -125,6 +153,7 @@ class AndroidTtsPlayer(private val context: Context) {
         tts?.shutdown()
         tts = null
         onSpeakingChanged = null
+        onError = null
         onDebug = null
     }
 
@@ -172,23 +201,40 @@ class AndroidTtsPlayer(private val context: Context) {
     private fun scheduleDuckReset(delayMs: Long) {
         duckResetRunnable?.let { mainHandler.removeCallbacks(it) }
         val runnable = Runnable {
-            restoreVolumeIfNeeded()
+            restoreOutputVolumeIfNeeded()
         }
         duckResetRunnable = runnable
         mainHandler.postDelayed(runnable, delayMs)
     }
 
-    private fun restoreVolumeIfNeeded() {
+    private fun restoreOutputVolumeIfNeeded() {
         duckResetRunnable?.let { mainHandler.removeCallbacks(it) }
         duckResetRunnable = null
-        if (!ducked) return
-        ducked = false
+        if (ducked) {
+            ducked = false
+            val am = audioManager
+            val previous = duckBaseVolume
+            duckBaseVolume = -1
+            if (am != null && previous > 0) {
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, previous, 0)
+                onDebug?.invoke("TTS duck restored volume -> $previous")
+            }
+        }
+        restoreManualVolumeIfNeeded()
+    }
+
+    private fun restoreManualVolumeIfNeeded() {
+        if (!manualScaled) {
+            return
+        }
         val am = audioManager ?: return
-        val previous = duckBaseVolume
-        duckBaseVolume = -1
+        val previous = manualBaseVolume
+        manualScaled = false
+        manualBaseVolume = -1
+        manualVolumeScale = 1f
         if (previous > 0) {
             am.setStreamVolume(AudioManager.STREAM_MUSIC, previous, 0)
-            onDebug?.invoke("TTS duck restored volume -> $previous")
+            onDebug?.invoke("TTS manual volume restored -> $previous")
         }
     }
 }

@@ -19,6 +19,7 @@ data class SettingsState(
     val speechProviderId: String = "iflytek",
     val allowListeningDuringSpeaking: Boolean = true,
     val bargeInMode: String = "stop_tts_on_speech",
+    val duckVolume: Float = 0.4f,
     val enableEchoCancellation: Boolean = true,
     val enableNoiseSuppression: Boolean = true,
     val accentTolerance: AccentToleranceState = AccentToleranceState(),

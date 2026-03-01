@@ -12,14 +12,19 @@ data class SpeechProviderDescriptor(
 data class SpeechListenRequest(
     val locale: String = "zh-CN",
     val partialResults: Boolean = true,
+    val frameMs: Int = 20,
     val audioProcessing: AudioProcessingOptions = AudioProcessingOptions()
 )
 
 interface SpeechProviderCallbacks {
+    fun onAsrReady()
     fun onAsrResult(text: String, isFinal: Boolean, confidence: Float?)
     fun onAsrError(code: Int, message: String)
-    fun onSpeechDetected(rms: Float)
+    fun onSpeechDetected(level: Float)
+    fun onSpeechStart()
+    fun onSpeechEnd()
     fun onSpeakingChanged(speaking: Boolean)
+    fun onSpeakError(code: Int, message: String)
     fun onDebug(message: String)
 }
 
@@ -29,7 +34,7 @@ interface SpeechProvider {
     fun stopListening(reason: String = "app")
     fun speak(text: String, voiceId: String?)
     fun stopSpeak()
-    fun duckCurrentTts()
+    fun setTtsVolume(volume: Float)
     fun listVoices(): List<VoiceOption>
     fun hasCapturedAudio(): Boolean
     fun isCapturePlaybackActive(): Boolean

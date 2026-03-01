@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -290,7 +291,7 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     } else {
         listOf(
             VoiceOption(id = "iflytek", displayName = "iFlytek"),
-            VoiceOption(id = "volcengine", displayName = "Volcengine")
+            VoiceOption(id = "volc", displayName = "Volcengine")
         )
     }
     val selectedProviderName =
@@ -373,6 +374,18 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
                 })
             }
         }
+        Text(
+            text = stringResource(
+                id = R.string.speech_duck_volume,
+                settings.duckVolume.coerceIn(0f, 1f)
+            )
+        )
+        Slider(
+            value = settings.duckVolume.coerceIn(0f, 1f),
+            onValueChange = { viewModel.setDuckVolume(it) },
+            valueRange = 0f..1f,
+            enabled = settings.bargeInMode == "duck_tts"
+        )
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(text = stringResource(id = R.string.speech_echo_cancellation))
             Switch(

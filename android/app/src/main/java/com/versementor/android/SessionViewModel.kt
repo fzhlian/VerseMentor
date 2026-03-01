@@ -2,6 +2,8 @@
 
 import android.app.Application
 import android.net.Uri
+import android.speech.SpeechRecognizer
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -59,6 +61,12 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         private const val START_NOT_READY_LOG_EVERY = 4
         private const val START_NOT_READY_FORCE_STOP_THRESHOLD = 8
         private const val START_NOT_READY_BACKOFF_DELAY_MS = 700
+        private const val NETWORK_ERROR_PROVIDER_FALLBACK_THRESHOLD = 2
+        private const val NETWORK_ERROR_PROVIDER_FALLBACK_COOLDOWN_MS = 20_000L
+        private const val NETWORK_TRANSIENT_PROMPT_THRESHOLD = 5
+        private const val NETWORK_RETRY_MIN_DELAY_MS = 650
+        private const val NETWORK_RETRY_STEP_DELAY_MS = 180
+        private const val ASR_LOG_TAG = "VerseMentorASR"
     }
 
     private val prefs = PreferenceStore(app)
@@ -75,6 +83,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingStartListening = false
     private var isManuallyPaused = false
     private var consecutiveTransientAsrErrors = 0
+    private var consecutiveNetworkAsrErrors = 0
+    private var lastNetworkFallbackAtMs = 0L
     private var consecutiveStartNotReady = 0
     private var transientRetryJob: Job? = null
 
@@ -116,6 +126,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 transientRetryJob?.cancel()
                 transientRetryJob = null
                 consecutiveTransientAsrErrors = 0
+                consecutiveNetworkAsrErrors = 0
+                lastNetworkFallbackAtMs = 0L
                 consecutiveStartNotReady = 0
                 val heard = text.trim()
                 val nextRecognizedLines = if (isFinal && heard.isNotEmpty() && uiState.recognizedLines.lastOrNull() != heard) {
@@ -137,7 +149,14 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (!uiState.sessionActive || uiState.sessionPaused) {
                     return@launch
                 }
+                Log.w(ASR_LOG_TAG, "error($code): $message")
                 consecutiveStartNotReady = 0
+                val networkError = isNetworkAsrError(code, message)
+                if (networkError) {
+                    consecutiveNetworkAsrErrors += 1
+                } else {
+                    consecutiveNetworkAsrErrors = 0
+                }
                 if (
                     code == SpeechIO.ERROR_SERVICE_UNAVAILABLE ||
                     code == SpeechIO.ERROR_START_LISTENING_FAILED
@@ -145,6 +164,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     transientRetryJob?.cancel()
                     transientRetryJob = null
                     consecutiveTransientAsrErrors = 0
+                    consecutiveNetworkAsrErrors = 0
+                    lastNetworkFallbackAtMs = 0L
                     pendingStartListening = false
                     isManuallyPaused = true
                     speech.stopListening(reason = "asr-error-infra")
@@ -160,6 +181,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     transientRetryJob?.cancel()
                     transientRetryJob = null
                     consecutiveTransientAsrErrors = 0
+                    consecutiveNetworkAsrErrors = 0
+                    lastNetworkFallbackAtMs = 0L
                     pendingStartListening = false
                     isManuallyPaused = true
                     speech.stopListening(reason = "asr-error-permission")
@@ -171,26 +194,48 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                     )
                     return@launch
                 }
-                if (isTransientAsrError(code)) {
+                if (maybeFallbackSpeechProviderForNetworkError()) {
+                    return@launch
+                }
+                if (isTransientAsrError(code, message)) {
                     consecutiveTransientAsrErrors += 1
                     pendingStartListening = false
+                    val promptThreshold = if (networkError) {
+                        settings.transientAsrPromptThreshold.coerceAtLeast(NETWORK_TRANSIENT_PROMPT_THRESHOLD)
+                    } else {
+                        settings.transientAsrPromptThreshold
+                    }
+                    val retryDelayMs = if (networkError) {
+                        (settings.transientAsrRetryDelayMs + (consecutiveNetworkAsrErrors * NETWORK_RETRY_STEP_DELAY_MS))
+                            .coerceIn(NETWORK_RETRY_MIN_DELAY_MS, MAX_TRANSIENT_ASR_RETRY_DELAY_MS)
+                    } else {
+                        settings.transientAsrRetryDelayMs
+                    }
                     uiState = uiState.copy(
                         awaitingSpeech = false,
-                        logs = appendLog("ASR transient($code)x$consecutiveTransientAsrErrors: $message")
+                        logs = appendLog(
+                            if (networkError) {
+                                "ASR transient($code)x$consecutiveTransientAsrErrors network retry=${retryDelayMs}ms threshold=$promptThreshold: $message"
+                            } else {
+                                "ASR transient($code)x$consecutiveTransientAsrErrors: $message"
+                            }
+                        )
                     )
-                    if (consecutiveTransientAsrErrors >= settings.transientAsrPromptThreshold) {
+                    if (consecutiveTransientAsrErrors >= promptThreshold) {
                         transientRetryJob?.cancel()
                         transientRetryJob = null
                         consecutiveTransientAsrErrors = 0
                         dispatch(SessionEvent.UserAsrError(code, message))
                         return@launch
                     }
-                    scheduleTransientAsrRetry()
+                    scheduleTransientAsrRetry(delayMs = retryDelayMs)
                     return@launch
                 }
                 transientRetryJob?.cancel()
                 transientRetryJob = null
                 consecutiveTransientAsrErrors = 0
+                consecutiveNetworkAsrErrors = 0
+                lastNetworkFallbackAtMs = 0L
                 pendingStartListening = false
                 uiState = uiState.copy(
                     awaitingSpeech = false,
@@ -204,6 +249,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (!uiState.sessionActive) {
                     return@launch
                 }
+                Log.d(ASR_LOG_TAG, message)
                 uiState = uiState.copy(
                     logs = appendLog("ASR debug: $message")
                 )
@@ -279,6 +325,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         pendingStartListening = false
         isManuallyPaused = false
         consecutiveTransientAsrErrors = 0
+        consecutiveNetworkAsrErrors = 0
+        lastNetworkFallbackAtMs = 0L
         consecutiveStartNotReady = 0
         transientRetryJob?.cancel()
         transientRetryJob = null
@@ -391,6 +439,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         isManuallyPaused = false
         isSpeaking = false
         consecutiveTransientAsrErrors = 0
+        consecutiveNetworkAsrErrors = 0
+        lastNetworkFallbackAtMs = 0L
         consecutiveStartNotReady = 0
         transientRetryJob?.cancel()
         transientRetryJob = null
@@ -1010,11 +1060,97 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun isTransientAsrError(code: Int): Boolean {
+    private fun isTransientAsrError(code: Int, message: String): Boolean {
         return code == SpeechIO.ERROR_AUDIO ||
+            code == SpeechRecognizer.ERROR_AUDIO ||
             code == SpeechIO.ERROR_NO_MATCH ||
+            code == SpeechRecognizer.ERROR_NO_MATCH ||
+            code == SpeechIO.ERROR_NETWORK ||
+            code == SpeechRecognizer.ERROR_NETWORK ||
+            code == SpeechIO.ERROR_NETWORK_TIMEOUT ||
+            code == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
             code == SpeechIO.ERROR_SPEECH_TIMEOUT ||
-            code == SpeechIO.ERROR_RECOGNIZER_BUSY
+            code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+            code == SpeechIO.ERROR_RECOGNIZER_BUSY ||
+            code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+            code == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS ||
+            isNetworkAsrError(code, message)
+    }
+
+    private fun isNetworkAsrError(code: Int, message: String): Boolean {
+        if (
+            code == SpeechIO.ERROR_NETWORK ||
+            code == SpeechIO.ERROR_NETWORK_TIMEOUT ||
+            code == SpeechRecognizer.ERROR_NETWORK ||
+            code == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+        ) {
+            return true
+        }
+        val normalizedMessage = message.trim()
+        if (normalizedMessage.isEmpty()) {
+            return false
+        }
+        return normalizedMessage.contains("network", ignoreCase = true) ||
+            normalizedMessage.contains("网络")
+    }
+
+    private fun maybeFallbackSpeechProviderForNetworkError(): Boolean {
+        if (consecutiveNetworkAsrErrors < NETWORK_ERROR_PROVIDER_FALLBACK_THRESHOLD) {
+            return false
+        }
+        val now = System.currentTimeMillis()
+        val elapsedSinceFallback = now - lastNetworkFallbackAtMs
+        if (elapsedSinceFallback < NETWORK_ERROR_PROVIDER_FALLBACK_COOLDOWN_MS) {
+            if (consecutiveNetworkAsrErrors == NETWORK_ERROR_PROVIDER_FALLBACK_THRESHOLD) {
+                val cooldownRemain = (NETWORK_ERROR_PROVIDER_FALLBACK_COOLDOWN_MS - elapsedSinceFallback)
+                    .coerceAtLeast(0L)
+                val cooldownLog = "ASR network fallback cooling down ${cooldownRemain}ms"
+                uiState = uiState.copy(logs = appendLog(cooldownLog))
+                Log.d(ASR_LOG_TAG, cooldownLog)
+            }
+            return false
+        }
+        val currentProvider = SpeechProviderId.fromRaw(settings.speechProviderId).rawValue
+        val configuredProviders = settings.speechProviders
+            .map { option -> SpeechProviderId.fromRaw(option.id).rawValue }
+            .distinct()
+        val discoveredProviders = speech.listSpeechProviders()
+            .map { provider -> SpeechProviderId.fromRaw(provider.id).rawValue }
+            .distinct()
+        val candidates = (configuredProviders + discoveredProviders)
+            .distinct()
+            .filter { id -> id != currentProvider }
+        if (candidates.isEmpty()) {
+            return false
+        }
+        val nextProvider = when {
+            currentProvider != SpeechProviderId.VOLCENGINE.rawValue &&
+                candidates.contains(SpeechProviderId.VOLCENGINE.rawValue) -> SpeechProviderId.VOLCENGINE.rawValue
+
+            currentProvider != SpeechProviderId.IFLYTEK.rawValue &&
+                candidates.contains(SpeechProviderId.IFLYTEK.rawValue) -> SpeechProviderId.IFLYTEK.rawValue
+
+            else -> candidates.first()
+        }
+        settings = settings.copy(speechProviderId = nextProvider)
+        prefs.saveSettings(settings)
+        applySpeechRuntimeConfig()
+        refreshVoices()
+        lastNetworkFallbackAtMs = now
+        consecutiveNetworkAsrErrors = 0
+        consecutiveTransientAsrErrors = 0
+        pendingStartListening = false
+        uiState = uiState.copy(
+            awaitingSpeech = false,
+            logs = appendLog(
+                "ASR network fallback: provider $currentProvider -> $nextProvider"
+            )
+        )
+        Log.w(ASR_LOG_TAG, "network fallback: provider $currentProvider -> $nextProvider")
+        scheduleTransientAsrRetry(
+            delayMs = settings.transientAsrRetryDelayMs.coerceAtLeast(450)
+        )
+        return true
     }
 
     private fun scheduleTransientAsrRetry(delayMs: Int = settings.transientAsrRetryDelayMs) {

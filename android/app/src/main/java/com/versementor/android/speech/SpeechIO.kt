@@ -5,6 +5,8 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.os.Build
 import android.content.Context
 import android.content.Intent
@@ -20,6 +22,7 @@ import android.speech.tts.UtteranceProgressListener
 import androidx.core.content.ContextCompat
 import com.versementor.android.R
 import com.versementor.android.VoiceOption
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -36,6 +39,8 @@ interface ISpeechIO {
     fun speak(text: String, voiceId: String?)
     fun stopSpeak()
     fun listVoices(): List<VoiceOption>
+    fun hasCapturedAudio(): Boolean
+    fun playCapturedAudio(): Boolean
     fun release()
 }
 
@@ -48,7 +53,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         private const val MIN_STOP_COMPLETION_TIMEOUT_MS = 450L
         private const val MAX_STOP_COMPLETION_TIMEOUT_MS = 1800L
         private const val LISTENING_STALE_TIMEOUT_MS = 9000L
-        private const val STALE_TIMEOUT_INFRA_ERROR_THRESHOLD = 2
+        private const val STALE_TIMEOUT_INFRA_ERROR_THRESHOLD = 1
         private const val MAIN_THREAD_WAIT_MS = 1200L
     }
 
@@ -64,6 +69,10 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var tts: TextToSpeech? = null
     private var ttsFocusRequest: AudioFocusRequest? = null
     private var ttsHasAudioFocus = false
+    private var captureRecorder: MediaRecorder? = null
+    private var captureRecording = false
+    private var capturePlayer: MediaPlayer? = null
+    private val captureFile = File(context.cacheDir, "asr_capture.m4a")
     private val legacyFocusChangeListener = AudioManager.OnAudioFocusChangeListener { change ->
         onAsrDebug?.invoke("TTS audio focus changed: $change")
     }
@@ -263,6 +272,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 lastStartRequestAtMs = now
                 lastRecognizerCallbackAtMs = now
                 scheduleListeningStaleTimeout(anchorStartAtMs = now)
+                startCaptureRecording()
                 onAsrDebug?.invoke("ASR startListening")
                 true
             }.onFailure {
@@ -290,6 +300,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             isStopping = true
             lastStopRequestAtMs = System.currentTimeMillis()
             consecutiveListeningStaleTimeouts = 0
+            stopCaptureRecording()
             onAsrDebug?.invoke("ASR stopListening by app")
             cancelPendingListeningStaleTimeout()
             scheduleStopCompletionTimeout()
@@ -329,6 +340,50 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         return voices.map { VoiceOption(it.name, it.name) }
     }
 
+    override fun hasCapturedAudio(): Boolean {
+        return captureFile.exists() && captureFile.length() > 0L
+    }
+
+    override fun playCapturedAudio(): Boolean {
+        return runOnMainSync(defaultValue = false) {
+            if (isReleased) return@runOnMainSync false
+            if (!hasCapturedAudio()) {
+                onAsrDebug?.invoke("ASR capture replay unavailable: no captured audio")
+                return@runOnMainSync false
+            }
+            stopCapturePlayback()
+            stopCaptureRecording()
+            runCatching {
+                val player = MediaPlayer()
+                player.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                player.setDataSource(captureFile.absolutePath)
+                player.setOnCompletionListener {
+                    stopCapturePlayback()
+                    onAsrDebug?.invoke("ASR capture replay completed")
+                }
+                player.setOnErrorListener { _, what, extra ->
+                    onAsrDebug?.invoke("ASR capture replay error what=$what extra=$extra")
+                    stopCapturePlayback()
+                    true
+                }
+                player.prepare()
+                player.start()
+                capturePlayer = player
+                onAsrDebug?.invoke("ASR capture replay started")
+                true
+            }.getOrElse {
+                onAsrDebug?.invoke("ASR capture replay failed: ${it.message ?: "unknown"}")
+                stopCapturePlayback()
+                false
+            }
+        }
+    }
+
     override fun stopSpeak() {
         runOnMainSync(defaultValue = Unit) {
             tts?.stop()
@@ -347,6 +402,8 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             isStopping = false
             suppressNextClientError = true
             consecutiveListeningStaleTimeouts = 0
+            stopCaptureRecording()
+            stopCapturePlayback()
             cancelPendingListeningStaleTimeout()
             cancelPendingStopCompletionTimeout()
             val recognizer = speechRecognizer
@@ -457,6 +514,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             forceResetAsrState()
             consecutiveListeningStaleTimeouts += 1
             val staleCount = consecutiveListeningStaleTimeouts
+            onAsrDebug?.invoke("ASR listening timeout staleCount=$staleCount")
             if (staleCount >= STALE_TIMEOUT_INFRA_ERROR_THRESHOLD) {
                 val reason = context.getString(R.string.asr_error_start_listening_failed)
                 onAsrDebug?.invoke(
@@ -488,6 +546,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     }
 
     private fun forceResetAsrState() {
+        stopCaptureRecording()
         cancelPendingListeningStaleTimeout()
         cancelPendingStopCompletionTimeout()
         isListening = false
@@ -516,6 +575,69 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             recognizer.cancel()
             onAsrDebug?.invoke("ASR recognizer cancel by $reason")
         }
+    }
+
+    private fun startCaptureRecording() {
+        stopCaptureRecording()
+        runCatching {
+            if (captureFile.exists()) {
+                captureFile.delete()
+            }
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioSamplingRate(16000)
+            recorder.setAudioEncodingBitRate(128000)
+            recorder.setOutputFile(captureFile.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            captureRecorder = recorder
+            captureRecording = true
+            onAsrDebug?.invoke("ASR capture recording started")
+        }.onFailure {
+            captureRecorder = null
+            captureRecording = false
+            onAsrDebug?.invoke("ASR capture recording failed: ${it.message ?: "unknown"}")
+        }
+    }
+
+    private fun stopCaptureRecording() {
+        val recorder = captureRecorder ?: return
+        runCatching {
+            if (captureRecording) {
+                recorder.stop()
+            }
+        }.onFailure {
+            onAsrDebug?.invoke("ASR capture recording stop failed: ${it.message ?: "unknown"}")
+            if (captureFile.exists()) {
+                captureFile.delete()
+            }
+        }
+        runCatching {
+            recorder.reset()
+        }
+        runCatching {
+            recorder.release()
+        }
+        captureRecorder = null
+        captureRecording = false
+        if (captureFile.exists() && captureFile.length() > 0L) {
+            onAsrDebug?.invoke("ASR capture recording saved: ${captureFile.length()} bytes")
+        }
+    }
+
+    private fun stopCapturePlayback() {
+        val player = capturePlayer ?: return
+        runCatching { player.stop() }
+        runCatching { player.reset() }
+        runCatching { player.release() }
+        capturePlayer = null
     }
 
     private fun buildAudioRouteSnapshot(): String {

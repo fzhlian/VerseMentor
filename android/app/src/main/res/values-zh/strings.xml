@@ -54,6 +54,7 @@
     <string name="asr_logs_clear">清空语音日志</string>
     <string name="asr_logs_title">语音日志</string>
     <string name="home_asr_logs_entry">日志（%1$d）</string>
+    <string name="home_replay_audio">回放录音</string>
     <string name="dynasty_mapping">朝代映射</string>
     <string name="author_library">作者库</string>
     <string name="add">添加</string>

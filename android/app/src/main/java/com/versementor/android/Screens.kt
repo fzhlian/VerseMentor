@@ -62,8 +62,10 @@ fun HomeScreen(
     hasPermission: Boolean,
     uiState: SessionUiState,
     asrLogCount: Int,
+    canReplayAudio: Boolean,
     onControlTap: () -> Unit,
     onControlLongPress: () -> Unit,
+    onReplayAudio: () -> Unit,
     onLogs: () -> Unit,
     onSettings: () -> Unit
 ) {
@@ -106,6 +108,15 @@ fun HomeScreen(
                     Text(
                         text = stringResource(id = R.string.home_asr_logs_entry, asrLogCount),
                         color = Color.White
+                    )
+                }
+                TextButton(
+                    enabled = canReplayAudio,
+                    onClick = onReplayAudio
+                ) {
+                    Text(
+                        text = stringResource(id = R.string.home_replay_audio),
+                        color = if (canReplayAudio) Color.White else Color(0xA0FFFFFF)
                     )
                 }
                 IconButton(onClick = onSettings) {

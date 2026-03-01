@@ -74,8 +74,10 @@ class MainActivity : ComponentActivity() {
                                 hasPermission = hasPermission,
                                 uiState = vm.uiState,
                                 asrLogCount = vm.getAsrLogs().size,
+                                canReplayAudio = vm.hasCapturedAudio(),
                                 onControlTap = { vm.onHomeButtonTap() },
                                 onControlLongPress = { vm.onHomeButtonLongPress() },
+                                onReplayAudio = { vm.replayCapturedAudio() },
                                 onLogs = { navController.navigate("asr_logs") },
                                 onSettings = { navController.navigate("settings") }
                             )

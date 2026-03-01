@@ -53,7 +53,6 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         const val MIN_ASR_STOP_TO_START_COOLDOWN_MS = 80
         const val MAX_ASR_STOP_TO_START_COOLDOWN_MS = 1200
         private const val MAX_VARIANTS_PER_LINE = 4
-        private const val MAX_UI_LOG_LINES = 200
         private const val START_NOT_READY_LOG_EVERY = 4
         private const val START_NOT_READY_FORCE_STOP_THRESHOLD = 8
         private const val START_NOT_READY_BACKOFF_DELAY_MS = 700
@@ -282,7 +281,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         uiState = SessionUiState(
             statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false),
             sessionActive = true,
-            sessionPaused = false
+            sessionPaused = false,
+            logs = uiState.logs
         )
         dispatch(SessionEvent.UserUiStart(System.currentTimeMillis()))
     }
@@ -396,7 +396,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         uiState = SessionUiState(
             statusText = resolveStatusText(SessionStateType.IDLE, awaitingSpeech = false),
             sessionActive = false,
-            sessionPaused = false
+            sessionPaused = false,
+            logs = uiState.logs
         )
     }
 
@@ -720,6 +721,23 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
         return getAsrLogs().joinToString(separator = "\n")
     }
 
+    fun hasCapturedAudio(): Boolean {
+        return speech.hasCapturedAudio()
+    }
+
+    fun replayCapturedAudio() {
+        val replayed = speech.playCapturedAudio()
+        uiState = uiState.copy(
+            logs = appendLog(
+                if (replayed) {
+                    "ASR debug: capture replay requested by app"
+                } else {
+                    "ASR debug: capture replay unavailable"
+                }
+            )
+        )
+    }
+
     fun clearAsrLogs() {
         val retained = uiState.logs.filterNot(::isAsrLogLine)
         uiState = uiState.copy(logs = retained)
@@ -949,8 +967,7 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun appendLog(line: String): List<String> {
-        val next = uiState.logs + line
-        return if (next.size > MAX_UI_LOG_LINES) next.takeLast(MAX_UI_LOG_LINES) else next
+        return uiState.logs + line
     }
 
     private fun applyAsrTuningToSpeech(source: SettingsState = settings) {

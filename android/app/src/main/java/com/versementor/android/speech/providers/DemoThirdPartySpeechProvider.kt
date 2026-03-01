@@ -107,7 +107,7 @@ abstract class DemoThirdPartySpeechProvider(
         listening = true
         captureDrainJob?.cancel()
         captureDrainJob = scope.launch {
-            for (_ in stream) {
+            for (frame in stream) {
                 if (!listening) {
                     break
                 }

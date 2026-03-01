@@ -47,6 +47,9 @@ export type SpeakOptions = {
   providerId?: SpeechProviderId
 }
 
+/**
+ * @deprecated Use `ISpeechIOv3` from `ports/speech_v3`.
+ */
 export interface ISpeechIO {
   startListening(options: SpeechListenOptions): void
   stopListening(): void
@@ -58,3 +61,6 @@ export interface ISpeechIO {
   listProviders?(): Promise<SpeechProviderDescriptor[]>
   configureDuplex?(options: SpeechDuplexOptions): void
 }
+
+/** @deprecated Use `ISpeechIOv3` from `ports/speech_v3`. */
+export type DeprecatedISpeechIO = ISpeechIO

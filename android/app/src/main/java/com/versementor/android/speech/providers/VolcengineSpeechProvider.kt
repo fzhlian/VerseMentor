@@ -103,13 +103,18 @@ class VolcengineSpeechProvider(
 
         val cfg = runtimeConfig()
         if (!cfg.isValid()) {
+            val missing = buildList {
+                if (cfg.appId.isBlank()) add("appId(volcengineAppId/VOLCENGINE_APP_ID)")
+                if (cfg.token.isBlank()) add("token(volcengineToken/VOLCENGINE_TOKEN)")
+                if (cfg.cluster.isBlank()) add("cluster(volcengineAsrCluster/volcengineCluster/VOLCENGINE_ASR_CLUSTER)")
+            }.joinToString(separator = ", ")
             if (cfg.resourceId.isNotBlank() && cfg.cluster.isBlank()) {
                 callbacks.onDebug(
                     "${descriptor.displayName}: resourceId is set but cluster is empty; current SDK init still requires cluster"
                 )
             }
             callbacks.onDebug(
-                "${descriptor.displayName}: sdk config missing appId/token/cluster in BuildConfig (resourceId is optional). Configure one of: volcengineAsrCluster / volcengineCluster / VOLCENGINE_ASR_CLUSTER"
+                "${descriptor.displayName}: sdk config missing in BuildConfig -> $missing; lengths appId=${cfg.appId.length}, token=${cfg.token.length}, cluster=${cfg.cluster.length}, resourceId=${cfg.resourceId.length}"
             )
             return false
         }

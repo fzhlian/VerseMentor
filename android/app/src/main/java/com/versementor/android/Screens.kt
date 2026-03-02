@@ -57,7 +57,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalClipboardManager
 import com.versementor.android.session.SessionUiState
-import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -366,7 +365,7 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
             SliderSetting(
                 title = stringResource(
                     id = R.string.speech_duck_volume,
-                    String.format(Locale.US, "%.0f%%", settings.duckVolume * 100)
+                    settings.duckVolume * 100f
                 ),
                 value = settings.duckVolume,
                 onValueChange = { viewModel.setDuckVolume(it) },

@@ -36,6 +36,7 @@
     <string name="speech_barge_none">不打断</string>
     <string name="speech_barge_duck">压低播报音量</string>
     <string name="speech_barge_stop">检测到说话即停止播报</string>
+    <string name="speech_duck_volume">压低音量：%1$.0f%%</string>
     <string name="speech_echo_cancellation">回声消除</string>
     <string name="speech_noise_suppression">降噪</string>
     <string name="tts_voice">发音人</string>

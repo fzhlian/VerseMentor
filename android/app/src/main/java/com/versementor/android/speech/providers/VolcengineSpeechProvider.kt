@@ -103,8 +103,13 @@ class VolcengineSpeechProvider(
 
         val cfg = runtimeConfig()
         if (!cfg.isValid()) {
+            if (cfg.resourceId.isNotBlank() && cfg.cluster.isBlank()) {
+                callbacks.onDebug(
+                    "${descriptor.displayName}: resourceId is set but cluster is empty; current SDK init still requires cluster"
+                )
+            }
             callbacks.onDebug(
-                "${descriptor.displayName}: sdk config missing appId/token and (cluster or resourceId) in BuildConfig"
+                "${descriptor.displayName}: sdk config missing appId/token/cluster in BuildConfig (resourceId is optional)"
             )
             return false
         }
@@ -752,8 +757,7 @@ class VolcengineSpeechProvider(
         val resourceId: String
     ) {
         fun isValid(): Boolean {
-            val routeReady = cluster.isNotBlank() || resourceId.isNotBlank()
-            return appId.isNotBlank() && token.isNotBlank() && routeReady
+            return appId.isNotBlank() && token.isNotBlank() && cluster.isNotBlank()
         }
     }
 }

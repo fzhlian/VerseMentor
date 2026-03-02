@@ -109,7 +109,7 @@ class VolcengineSpeechProvider(
                 )
             }
             callbacks.onDebug(
-                "${descriptor.displayName}: sdk config missing appId/token/cluster in BuildConfig (resourceId is optional)"
+                "${descriptor.displayName}: sdk config missing appId/token/cluster in BuildConfig (resourceId is optional). Configure one of: volcengineAsrCluster / volcengineCluster / VOLCENGINE_ASR_CLUSTER"
             )
             return false
         }

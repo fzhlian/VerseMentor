@@ -11,12 +11,36 @@ val localProperties = Properties().apply {
         localPropsFile.inputStream().use(::load)
     }
 }
+val workspaceLocalProperties = Properties().apply {
+    val localPropsFile = rootProject.projectDir.parentFile?.resolve("local.properties")
+    if (localPropsFile != null && localPropsFile.exists()) {
+        localPropsFile.inputStream().use(::load)
+    }
+}
 
-fun readStringProperty(name: String): String? {
-    return (project.findProperty(name) as String?)
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
-        ?: localProperties.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+fun readStringProperty(vararg names: String): String? {
+    for (name in names) {
+        val fromProject = (project.findProperty(name) as String?)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        if (fromProject != null) return fromProject
+
+        val fromAndroidLocal = localProperties.getProperty(name)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        if (fromAndroidLocal != null) return fromAndroidLocal
+
+        val fromWorkspaceLocal = workspaceLocalProperties.getProperty(name)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        if (fromWorkspaceLocal != null) return fromWorkspaceLocal
+
+        val fromEnv = System.getenv(name)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        if (fromEnv != null) return fromEnv
+    }
+    return null
 }
 
 val variantApiEndpoint: String = readStringProperty("variantApiEndpoint").orEmpty()
@@ -25,19 +49,52 @@ val useSharedCoreReducer: Boolean = readStringProperty("useSharedCoreReducer")
     ?.lowercase()
     ?.let { it == "true" || it == "1" || it == "yes" || it == "on" }
     ?: false
-val volcengineAppId: String = readStringProperty("volcengineAppId").orEmpty()
-val volcengineToken: String = readStringProperty("volcengineToken").orEmpty()
-val volcengineAsrCluster: String = readStringProperty("volcengineAsrCluster").orEmpty()
+val volcengineAppId: String = readStringProperty(
+    "volcengineAppId",
+    "volcengineAppID",
+    "volcengineAppid",
+    "VOLCENGINE_APP_ID",
+    "VOLCENGINE_APPID"
+).orEmpty()
+val volcengineToken: String = readStringProperty(
+    "volcengineToken",
+    "volcengineAccessToken",
+    "volcengineAppToken",
+    "VOLCENGINE_TOKEN",
+    "VOLCENGINE_ACCESS_TOKEN",
+    "VOLCENGINE_APP_TOKEN"
+).orEmpty()
+val volcengineAsrCluster: String = readStringProperty(
+    "volcengineAsrCluster",
+    "volcengineCluster",
+    "VOLCENGINE_ASR_CLUSTER",
+    "VOLCENGINE_CLUSTER"
+).orEmpty()
 val volcengineAsrAddress: String =
-    readStringProperty("volcengineAsrAddress")
+    readStringProperty(
+        "volcengineAsrAddress",
+        "volcengineAddress",
+        "VOLCENGINE_ASR_ADDRESS",
+        "VOLCENGINE_ADDRESS"
+    )
         ?: "wss://openspeech.bytedance.com"
 val volcengineAsrUri: String =
-    readStringProperty("volcengineAsrUri")
+    readStringProperty(
+        "volcengineAsrUri",
+        "volcengineUri",
+        "VOLCENGINE_ASR_URI",
+        "VOLCENGINE_URI"
+    )
         ?: "/api/v2/asr"
 val volcengineUid: String =
-    readStringProperty("volcengineUid")
+    readStringProperty("volcengineUid", "VOLCENGINE_UID")
         ?: "versementor-android"
-val volcengineResourceId: String = readStringProperty("volcengineResourceId").orEmpty()
+val volcengineResourceId: String = readStringProperty(
+    "volcengineResourceId",
+    "volcengineAsrResourceId",
+    "VOLCENGINE_RESOURCE_ID",
+    "VOLCENGINE_ASR_RESOURCE_ID"
+).orEmpty()
 val releaseStoreFilePath: String =
     readStringProperty("releaseStoreFile")
         ?: "${rootDir}/keystore/versementor-release.jks"

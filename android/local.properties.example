@@ -9,6 +9,8 @@ sdk.dir=
 # volcengineAppId=your_app_id
 # volcengineToken=your_access_token
 # volcengineAsrCluster=your_asr_cluster
+# Alias keys also supported:
+# volcengineCluster / VOLCENGINE_ASR_CLUSTER
 #
 # Optional:
 # volcengineAsrAddress=wss://openspeech.bytedance.com

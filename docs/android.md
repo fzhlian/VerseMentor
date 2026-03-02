@@ -23,7 +23,21 @@ cd android
 .\scripts\gradlew-with-jdk.cmd :app:assembleRelease --console=plain
 ```
 Release output path:
-- `android/app/build/outputs/apk/release/app-release.apk`
+- `android/app/build/outputs/apk/release/VerseMentor-v<versionName>-release.apk`
+
+Fixed release flow (must follow in order):
+1. `git checkout main && git pull --ff-only origin main`
+2. Confirm clean tree: `git status --short` must be empty.
+3. Complete all code changes first (including docs/config), then run validation/build.
+4. Bump `android/app/build.gradle.kts` `versionCode` and `versionName` exactly once.
+5. Build final package once from that commit context:
+   - `cd android`
+   - `.\scripts\gradlew-with-jdk.cmd :app:assembleRelease --console=plain`
+6. Commit all release content (feature fixes + version bump together) to one final release commit.
+7. Push commit to `origin/main`.
+8. Create tag on that exact pushed commit (for example `v0.4.18`) and push tag.
+9. Create GitHub Release from the tag and upload the APK generated from the same commit.
+10. After tag is published, do not overwrite that Release asset. Any further code change requires a new version/tag/release.
 
 Preflight check:
 ```

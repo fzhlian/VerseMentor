@@ -112,4 +112,23 @@
     <string name="asr_error_service_unavailable">Speech recognition service is unavailable on this device.</string>
     <string name="asr_error_fake_engine">Detected placeholder speech engine (%1$s). Please switch the speech recognition service in system settings.</string>
     <string name="asr_error_start_listening_failed">startListening failed</string>
+
+    <!-- Settings Categories -->
+    <string name="settings_category_speech">Speech Service</string>
+    <string name="settings_category_recognition">Recognition Tuning</string>
+    <string name="settings_category_content">Content Management</string>
+    <string name="settings_category_advanced">Advanced ASR Tuning</string>
+    <string name="settings_category_debug">Debugging</string>
+
+    <!-- Setting Hints -->
+    <string name="speech_allow_listen_while_speaking_hint">Allows the app to listen for your speech while it is speaking</string>
+    <string name="tone_policy_hint">Remind you of the correct tone if you get it wrong</string>
+    <string name="accent_tolerance_hint">Tolerate common phonetic deviations</string>
+    <string name="variants_clear_hint">Force re-fetching variant data from the network</string>
+
+    <!-- UI Labels -->
+    <string name="collapse">Collapse</string>
+    <string name="expand">Expand</string>
+    <string name="run_check">Run Check</string>
+    <string name="debug_not_run">Not run</string>
 </resources>

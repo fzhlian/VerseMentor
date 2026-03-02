@@ -329,6 +329,9 @@ class VolcengineSpeechProvider(
             runCatching { sdk.setContext(appContext) }
             runCatching { sdk.setListener(speechListener) }
 
+            callbacks.onDebug(
+                "${descriptor.displayName}: init config route uri=${cfg.asrUri.ifBlank { "<default>" }} cluster=${cfg.cluster.ifBlank { "<none>" }} resourceId=${cfg.resourceId.ifBlank { "<none>" }} appIdLen=${cfg.appId.length} tokenLen=${cfg.token.length}"
+            )
             applyBaseOptions(sdk, cfg)
             applyAsrOptions(sdk, request)
 
@@ -419,6 +422,7 @@ class VolcengineSpeechProvider(
                 cfg.asrUri
             )
         }
+        applyProtocolOptions(engine, cfg)
         val androidId = runCatching {
             Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
         }.getOrDefault("")
@@ -436,6 +440,22 @@ class VolcengineSpeechProvider(
             SpeechEngineDefines.PARAMS_KEY_USE_ALOG_BOOL,
             true
         )
+    }
+
+    private fun applyProtocolOptions(engine: SpeechEngine, cfg: VolcengineAsrConfig) {
+        val bigModelRoute = cfg.asrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
+        if (!bigModelRoute) return
+        runCatching {
+            val defines = SpeechEngineDefines::class.java
+            val key = defines.getField("PARAMS_KEY_PROTOCOL_TYPE_INT").get(null) as String
+            val seed = (defines.getField("PROTOCOL_TYPE_SEED").get(null) as Number).toInt()
+            engine.setOptionInt(key, seed)
+            callbacks.onDebug("${descriptor.displayName}: protocol type set to PROTOCOL_TYPE_SEED for bigmodel route")
+        }.onFailure { error ->
+            callbacks.onDebug(
+                "${descriptor.displayName}: protocol type seed not available in current SDK (${error.javaClass.simpleName})"
+            )
+        }
     }
 
     private fun applyAsrOptions(engine: SpeechEngine, request: SpeechListenRequest) {

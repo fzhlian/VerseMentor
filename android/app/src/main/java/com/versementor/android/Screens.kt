@@ -1,9 +1,11 @@
 package com.versementor.android
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -17,12 +19,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
@@ -37,6 +37,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalClipboardManager
 import com.versementor.android.session.SessionUiState
+import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -265,553 +267,552 @@ fun SessionScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
     val settings = viewModel.settings
-    val scrollState = rememberScrollState()
-    var providerExpanded by remember { mutableStateOf(false) }
-    var voiceExpanded by remember { mutableStateOf(false) }
-    var bargeModeExpanded by remember { mutableStateOf(false) }
-    var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
-    var ttlError by remember { mutableStateOf(false) }
-    var transientPromptText by remember { mutableStateOf(settings.transientAsrPromptThreshold.toString()) }
-    var transientPromptError by remember { mutableStateOf(false) }
-    var transientDelayText by remember { mutableStateOf(settings.transientAsrRetryDelayMs.toString()) }
-    var transientDelayError by remember { mutableStateOf(false) }
-    var stopStartCooldownText by remember { mutableStateOf(settings.asrStopToStartCooldownMs.toString()) }
-    var stopStartCooldownError by remember { mutableStateOf(false) }
-    var minAcceptedSpeechMsText by remember { mutableStateOf(settings.asrMinAcceptedSpeechMs.toString()) }
-    var minAcceptedSpeechMsError by remember { mutableStateOf(false) }
-    var minAcceptedSpeechFramesText by remember { mutableStateOf(settings.asrMinAcceptedSpeechFrames.toString()) }
-    var minAcceptedSpeechFramesError by remember { mutableStateOf(false) }
-    var shortSpeechAcceptFramesText by remember { mutableStateOf(settings.asrShortSpeechAcceptFrames.toString()) }
-    var shortSpeechAcceptFramesError by remember { mutableStateOf(false) }
-    var aliasText by remember { mutableStateOf("") }
-    var canonicalText by remember { mutableStateOf("") }
-    var groupAlias by remember { mutableStateOf("") }
-    var groupIds by remember { mutableStateOf("") }
-    var authorName by remember { mutableStateOf("") }
-    var authorAlias by remember { mutableStateOf("") }
-    val providerOptions = if (settings.speechProviders.isNotEmpty()) {
-        settings.speechProviders
-    } else {
-        listOf(
-            VoiceOption(id = "iflytek", displayName = "iFlytek"),
-            VoiceOption(id = "volc", displayName = "Volcengine")
-        )
-    }
-    val selectedProviderName =
-        providerOptions.firstOrNull { it.id == settings.speechProviderId }?.displayName ?: settings.speechProviderId
-    val bargeInOptions = listOf(
-        "none" to stringResource(id = R.string.speech_barge_none),
-        "duck_tts" to stringResource(id = R.string.speech_barge_duck),
-        "stop_tts_on_speech" to stringResource(id = R.string.speech_barge_stop)
-    )
-    val selectedBargeInName =
-        bargeInOptions.firstOrNull { it.first == settings.bargeInMode }?.second ?: settings.bargeInMode
-    val shortSpeechFramesFloor = if (
-        settings.asrMinAcceptedSpeechFrames > SessionViewModel.MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES
-    ) {
-        settings.asrMinAcceptedSpeechFrames
-    } else {
-        SessionViewModel.MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES
-    }
 
-    LaunchedEffect(settings.variantTtlDays) {
-        ttlText = settings.variantTtlDays.toString()
-        ttlError = false
-    }
-    LaunchedEffect(settings.transientAsrPromptThreshold) {
-        transientPromptText = settings.transientAsrPromptThreshold.toString()
-        transientPromptError = false
-    }
-    LaunchedEffect(settings.transientAsrRetryDelayMs) {
-        transientDelayText = settings.transientAsrRetryDelayMs.toString()
-        transientDelayError = false
-    }
-    LaunchedEffect(settings.asrStopToStartCooldownMs) {
-        stopStartCooldownText = settings.asrStopToStartCooldownMs.toString()
-        stopStartCooldownError = false
-    }
-    LaunchedEffect(settings.asrMinAcceptedSpeechMs) {
-        minAcceptedSpeechMsText = settings.asrMinAcceptedSpeechMs.toString()
-        minAcceptedSpeechMsError = false
-    }
-    LaunchedEffect(settings.asrMinAcceptedSpeechFrames) {
-        minAcceptedSpeechFramesText = settings.asrMinAcceptedSpeechFrames.toString()
-        minAcceptedSpeechFramesError = false
-    }
-    LaunchedEffect(settings.asrShortSpeechAcceptFrames) {
-        shortSpeechAcceptFramesText = settings.asrShortSpeechAcceptFrames.toString()
-        shortSpeechAcceptFramesError = false
-    }
-
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = stringResource(id = R.string.settings), style = MaterialTheme.typography.headlineSmall)
-            Button(onClick = onBack) { Text(text = stringResource(id = R.string.back)) }
+        // Header
+        stickyHeader {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = stringResource(id = R.string.settings), style = MaterialTheme.typography.headlineSmall)
+                Button(onClick = onBack) { Text(text = stringResource(id = R.string.back)) }
+            }
         }
 
-        Text(text = stringResource(id = R.string.language))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { viewModel.setFollowSystem(true) }) {
-                Text(text = stringResource(id = R.string.language_system))
-            }
-            Button(onClick = { viewModel.setFollowSystem(false) }) {
-                Text(text = stringResource(id = R.string.language_zh))
-            }
+        // --- Speech Service Category ---
+        item {
+            SettingsCategory(title = stringResource(R.string.settings_category_speech))
         }
+        item {
+            val providerOptions = if (settings.speechProviders.isNotEmpty()) {
+                settings.speechProviders
+            } else {
+                listOf(
+                    VoiceOption(id = "iflytek", displayName = "iFlytek"),
+                    VoiceOption(id = "volc", displayName = "Volcengine")
+                )
+            }
+            val selectedProviderName =
+                providerOptions.firstOrNull { it.id == settings.speechProviderId }?.displayName
+                    ?: settings.speechProviderId
+            var providerExpanded by remember { mutableStateOf(false) }
 
-        Text(text = stringResource(id = R.string.speech_provider))
-        Button(onClick = { providerExpanded = true }) {
-            Text(text = selectedProviderName)
+            DropdownSetting(
+                title = stringResource(id = R.string.speech_provider),
+                selectedValue = selectedProviderName,
+                expanded = providerExpanded,
+                onExpandedChange = { providerExpanded = it },
+                options = providerOptions.map { it.id to it.displayName },
+                onOptionSelected = { providerId ->
+                    viewModel.setSpeechProvider(providerId)
+                }
+            )
         }
-        DropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
-            providerOptions.forEach { provider ->
-                DropdownMenuItem(text = { Text(provider.displayName) }, onClick = {
-                    viewModel.setSpeechProvider(provider.id)
-                    providerExpanded = false
-                })
-            }
+        item {
+            var voiceExpanded by remember { mutableStateOf(false) }
+            DropdownSetting(
+                title = stringResource(id = R.string.tts_voice),
+                selectedValue = settings.ttsVoiceName.ifEmpty { stringResource(id = R.string.select) },
+                expanded = voiceExpanded,
+                onExpandedChange = { voiceExpanded = it },
+                options = settings.ttsVoices.map { it.id to it.displayName },
+                onOptionSelected = { voiceId ->
+                    val voice = settings.ttsVoices.first { it.id == voiceId }
+                    viewModel.setTtsVoice(voice.id, voice.displayName)
+                }
+            )
         }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = stringResource(id = R.string.speech_allow_listen_while_speaking))
-            Switch(
+        item {
+            val bargeInOptions = listOf(
+                "none" to stringResource(id = R.string.speech_barge_none),
+                "duck_tts" to stringResource(id = R.string.speech_barge_duck),
+                "stop_tts_on_speech" to stringResource(id = R.string.speech_barge_stop)
+            )
+            val selectedBargeInName =
+                bargeInOptions.firstOrNull { it.first == settings.bargeInMode }?.second ?: settings.bargeInMode
+            var bargeModeExpanded by remember { mutableStateOf(false) }
+            DropdownSetting(
+                title = stringResource(id = R.string.speech_barge_mode),
+                selectedValue = selectedBargeInName,
+                expanded = bargeModeExpanded,
+                onExpandedChange = { bargeModeExpanded = it },
+                options = bargeInOptions,
+                onOptionSelected = { mode ->
+                    viewModel.setBargeInMode(mode)
+                }
+            )
+        }
+        item {
+            SwitchSetting(
+                title = stringResource(id = R.string.speech_allow_listen_while_speaking),
+                subtitle = stringResource(id = R.string.speech_allow_listen_while_speaking_hint),
                 checked = settings.allowListeningDuringSpeaking,
                 onCheckedChange = { viewModel.setAllowListeningDuringSpeaking(it) }
             )
         }
-        Text(text = stringResource(id = R.string.speech_barge_mode))
-        Button(onClick = { bargeModeExpanded = true }) {
-            Text(text = selectedBargeInName)
-        }
-        DropdownMenu(expanded = bargeModeExpanded, onDismissRequest = { bargeModeExpanded = false }) {
-            bargeInOptions.forEach { (mode, label) ->
-                DropdownMenuItem(text = { Text(label) }, onClick = {
-                    viewModel.setBargeInMode(mode)
-                    bargeModeExpanded = false
-                })
-            }
-        }
-        Text(
-            text = stringResource(
-                id = R.string.speech_duck_volume,
-                settings.duckVolume.coerceIn(0f, 1f)
+        item {
+            SliderSetting(
+                title = stringResource(
+                    id = R.string.speech_duck_volume,
+                    String.format(Locale.US, "%.0f%%", settings.duckVolume * 100)
+                ),
+                value = settings.duckVolume,
+                onValueChange = { viewModel.setDuckVolume(it) },
+                enabled = settings.bargeInMode == "duck_tts"
             )
-        )
-        Slider(
-            value = settings.duckVolume.coerceIn(0f, 1f),
-            onValueChange = { viewModel.setDuckVolume(it) },
-            valueRange = 0f..1f,
-            enabled = settings.bargeInMode == "duck_tts"
-        )
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = stringResource(id = R.string.speech_echo_cancellation))
-            Switch(
+        }
+        item {
+            SwitchSetting(
+                title = stringResource(id = R.string.speech_echo_cancellation),
                 checked = settings.enableEchoCancellation,
                 onCheckedChange = { viewModel.setEchoCancellationEnabled(it) }
             )
         }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = stringResource(id = R.string.speech_noise_suppression))
-            Switch(
+        item {
+            SwitchSetting(
+                title = stringResource(id = R.string.speech_noise_suppression),
                 checked = settings.enableNoiseSuppression,
                 onCheckedChange = { viewModel.setNoiseSuppressionEnabled(it) }
             )
         }
 
-        Text(text = stringResource(id = R.string.tts_voice))
-        Button(onClick = { voiceExpanded = true }) {
-            Text(text = settings.ttsVoiceName.ifEmpty { stringResource(id = R.string.select) })
-        }
-        DropdownMenu(expanded = voiceExpanded, onDismissRequest = { voiceExpanded = false }) {
-            settings.ttsVoices.forEach { voice ->
-                DropdownMenuItem(text = { Text(voice.displayName) }, onClick = {
-                    viewModel.setTtsVoice(voice.id, voice.displayName)
-                    voiceExpanded = false
-                })
-            }
-        }
 
-        Text(text = stringResource(id = R.string.accent_tolerance))
-        ToggleRow(label = "an/ang", value = settings.accentTolerance.anAng, onToggle = { viewModel.setAccentTolerance(anAng = it) })
-        ToggleRow(label = "en/eng", value = settings.accentTolerance.enEng, onToggle = { viewModel.setAccentTolerance(enEng = it) })
-        ToggleRow(label = "in/ing", value = settings.accentTolerance.inIng, onToggle = { viewModel.setAccentTolerance(inIng = it) })
-        ToggleRow(label = "ian/iang", value = settings.accentTolerance.ianIang, onToggle = { viewModel.setAccentTolerance(ianIang = it) })
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = stringResource(id = R.string.tone_policy))
-            Switch(checked = settings.toneRemind, onCheckedChange = { viewModel.setToneRemind(it) })
+        // --- Recognition Tuning Category ---
+        item {
+            SettingsCategory(title = stringResource(R.string.settings_category_recognition))
         }
-
-        Text(text = stringResource(id = R.string.variants))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = stringResource(id = R.string.variants_enable))
-            Switch(checked = settings.variantsEnable, onCheckedChange = { viewModel.setVariantsEnable(it) })
-        }
-        OutlinedTextField(
-            value = ttlText,
-            onValueChange = {
-                ttlText = it
-                val value = it.toIntOrNull()
-                val isValid = value != null && value in SessionViewModel.MIN_VARIANT_TTL_DAYS..SessionViewModel.MAX_VARIANT_TTL_DAYS
-                ttlError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setVariantTtl)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.variants_ttl)) },
-            isError = ttlError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (ttlError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.variants_ttl_invalid,
-                            SessionViewModel.MIN_VARIANT_TTL_DAYS,
-                            SessionViewModel.MAX_VARIANT_TTL_DAYS
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.variants_ttl_hint,
-                            SessionViewModel.MIN_VARIANT_TTL_DAYS,
-                            SessionViewModel.MAX_VARIANT_TTL_DAYS
-                        )
-                    )
-                }
-            }
-        )
-        Button(onClick = { viewModel.clearVariantCache() }) {
-            Text(text = stringResource(id = R.string.variants_clear))
-        }
-        OutlinedTextField(
-            value = transientPromptText,
-            onValueChange = {
-                transientPromptText = it
-                val value = it.toIntOrNull()
-                val isValid =
-                    value != null &&
-                        value in SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD..SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
-                transientPromptError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setTransientAsrPromptThreshold)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.asr_transient_prompt_threshold)) },
-            isError = transientPromptError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (transientPromptError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_transient_prompt_threshold_invalid,
-                            SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD,
-                            SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_transient_prompt_threshold_hint,
-                            SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD,
-                            SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
-                        )
-                    )
-                }
-            }
-        )
-        OutlinedTextField(
-            value = transientDelayText,
-            onValueChange = {
-                transientDelayText = it
-                val value = it.toIntOrNull()
-                val isValid =
-                    value != null &&
-                        value in SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS..SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
-                transientDelayError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setTransientAsrRetryDelayMs)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.asr_transient_retry_delay_ms)) },
-            isError = transientDelayError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (transientDelayError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_transient_retry_delay_ms_invalid,
-                            SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
-                            SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_transient_retry_delay_ms_hint,
-                            SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS,
-                            SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
-                        )
-                    )
-                }
-            }
-        )
-        OutlinedTextField(
-            value = stopStartCooldownText,
-            onValueChange = {
-                stopStartCooldownText = it
-                val value = it.toIntOrNull()
-                val isValid =
-                    value != null &&
-                        value in SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS..SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
-                stopStartCooldownError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setAsrStopToStartCooldownMs)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.asr_stop_start_cooldown_ms)) },
-            isError = stopStartCooldownError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (stopStartCooldownError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_stop_start_cooldown_ms_invalid,
-                            SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS,
-                            SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_stop_start_cooldown_ms_hint,
-                            SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS,
-                            SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
-                        )
-                    )
-                }
-            }
-        )
-        OutlinedTextField(
-            value = minAcceptedSpeechMsText,
-            onValueChange = {
-                minAcceptedSpeechMsText = it
-                val value = it.toIntOrNull()
-                val isValid =
-                    value != null &&
-                        value in SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS..SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
-                minAcceptedSpeechMsError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setAsrMinAcceptedSpeechMs)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.asr_min_accepted_speech_ms)) },
-            isError = minAcceptedSpeechMsError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (minAcceptedSpeechMsError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_min_accepted_speech_ms_invalid,
-                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS,
-                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_min_accepted_speech_ms_hint,
-                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS,
-                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
-                        )
-                    )
-                }
-            }
-        )
-        OutlinedTextField(
-            value = minAcceptedSpeechFramesText,
-            onValueChange = {
-                minAcceptedSpeechFramesText = it
-                val value = it.toIntOrNull()
-                val isValid =
-                    value != null &&
-                        value in SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES..SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
-                minAcceptedSpeechFramesError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setAsrMinAcceptedSpeechFrames)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.asr_min_accepted_speech_frames)) },
-            isError = minAcceptedSpeechFramesError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (minAcceptedSpeechFramesError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_min_accepted_speech_frames_invalid,
-                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
-                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_min_accepted_speech_frames_hint,
-                            SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES,
-                            SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
-                        )
-                    )
-                }
-            }
-        )
-        OutlinedTextField(
-            value = shortSpeechAcceptFramesText,
-            onValueChange = {
-                shortSpeechAcceptFramesText = it
-                val value = it.toIntOrNull()
-                val isValid =
-                    value != null &&
-                        value in shortSpeechFramesFloor..SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
-                shortSpeechAcceptFramesError = it.isNotEmpty() && !isValid
-                if (isValid) {
-                    value?.let(viewModel::setAsrShortSpeechAcceptFrames)
-                }
-            },
-            label = { Text(text = stringResource(id = R.string.asr_short_speech_accept_frames)) },
-            isError = shortSpeechAcceptFramesError,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = {
-                if (shortSpeechAcceptFramesError) {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_short_speech_accept_frames_invalid,
-                            shortSpeechFramesFloor,
-                            SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
-                        )
-                    )
-                } else {
-                    Text(
-                        text = stringResource(
-                            id = R.string.asr_short_speech_accept_frames_hint,
-                            shortSpeechFramesFloor,
-                            SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
-                        )
-                    )
-                }
-            }
-        )
-
-        Text(text = stringResource(id = R.string.dynasty_mapping))
-        LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-            items(settings.dynastyMappings) { mapping ->
-                Text(text = mapping)
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(modifier = Modifier.weight(1f), value = aliasText, onValueChange = { aliasText = it }, label = { Text(text = stringResource(id = R.string.alias)) })
-            OutlinedTextField(modifier = Modifier.weight(1f), value = canonicalText, onValueChange = { canonicalText = it }, label = { Text(text = stringResource(id = R.string.canonical)) })
-            Button(onClick = { viewModel.addDynastyAlias(aliasText, canonicalText); aliasText = ""; canonicalText = "" }) {
-                Text(text = stringResource(id = R.string.add))
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(modifier = Modifier.weight(1f), value = groupAlias, onValueChange = { groupAlias = it }, label = { Text(text = stringResource(id = R.string.group)) })
-            OutlinedTextField(modifier = Modifier.weight(1f), value = groupIds, onValueChange = { groupIds = it }, label = { Text(text = stringResource(id = R.string.ids_names)) })
-            Button(onClick = { viewModel.addDynastyGroup(groupAlias, groupIds); groupAlias = ""; groupIds = "" }) {
-                Text(text = stringResource(id = R.string.add))
-            }
-        }
-
-        Text(text = stringResource(id = R.string.author_library))
-        LazyColumn(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-            items(settings.authors) { author ->
-                Text(text = author)
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(modifier = Modifier.weight(1f), value = authorName, onValueChange = { authorName = it }, label = { Text(text = stringResource(id = R.string.author)) })
-            OutlinedTextField(modifier = Modifier.weight(1f), value = authorAlias, onValueChange = { authorAlias = it }, label = { Text(text = stringResource(id = R.string.alias)) })
-            Button(onClick = { viewModel.addAuthor(authorName, authorAlias); authorName = ""; authorAlias = "" }) {
-                Text(text = stringResource(id = R.string.add))
-            }
-        }
-
-        HorizontalDivider()
-        Text(text = stringResource(id = R.string.debug_title))
-        Text(
-            text = stringResource(
-                id = R.string.debug_asr_prompt_threshold,
-                settings.transientAsrPromptThreshold
+        item {
+            SwitchSetting(
+                title = stringResource(id = R.string.tone_policy),
+                subtitle = stringResource(id = R.string.tone_policy_hint),
+                checked = settings.toneRemind,
+                onCheckedChange = { viewModel.setToneRemind(it) }
             )
-        )
-        Text(
-            text = stringResource(
-                id = R.string.debug_asr_retry_delay_ms,
-                settings.transientAsrRetryDelayMs
+        }
+        item {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(text = stringResource(id = R.string.accent_tolerance), style = MaterialTheme.typography.bodyLarge)
+                Text(text = stringResource(id = R.string.accent_tolerance_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    CheckboxSetting("an/ang", settings.accentTolerance.anAng) { viewModel.setAccentTolerance(anAng = it) }
+                    CheckboxSetting("en/eng", settings.accentTolerance.enEng) { viewModel.setAccentTolerance(enEng = it) }
+                    CheckboxSetting("in/ing", settings.accentTolerance.inIng) { viewModel.setAccentTolerance(inIng = it) }
+                    CheckboxSetting("ian/iang", settings.accentTolerance.ianIang) { viewModel.setAccentTolerance(ianIang = it) }
+                }
+            }
+            HorizontalDivider()
+        }
+
+        // --- Content Management Category ---
+        item {
+            SettingsCategory(title = stringResource(R.string.settings_category_content))
+        }
+        item {
+            SwitchSetting(
+                title = stringResource(id = R.string.variants_enable),
+                checked = settings.variantsEnable,
+                onCheckedChange = { viewModel.setVariantsEnable(it) }
             )
-        )
-        Text(
-            text = stringResource(
-                id = R.string.debug_asr_stop_start_cooldown_ms,
-                settings.asrStopToStartCooldownMs
+        }
+        item {
+            var ttlText by remember { mutableStateOf(settings.variantTtlDays.toString()) }
+            var ttlError by remember { mutableStateOf(false) }
+            LaunchedEffect(settings.variantTtlDays) {
+                ttlText = settings.variantTtlDays.toString()
+                ttlError = false
+            }
+            TextFieldSetting(
+                value = ttlText,
+                onValueChange = {
+                    ttlText = it
+                    val value = it.toIntOrNull()
+                    val isValid = value != null && value in SessionViewModel.MIN_VARIANT_TTL_DAYS..SessionViewModel.MAX_VARIANT_TTL_DAYS
+                    ttlError = it.isNotEmpty() && !isValid
+                    if (isValid) {
+                        value?.let(viewModel::setVariantTtl)
+                    }
+                },
+                label = stringResource(id = R.string.variants_ttl),
+                isError = ttlError,
+                supportingText = if (ttlError) {
+                    stringResource(id = R.string.variants_ttl_invalid, SessionViewModel.MIN_VARIANT_TTL_DAYS, SessionViewModel.MAX_VARIANT_TTL_DAYS)
+                } else {
+                    stringResource(id = R.string.variants_ttl_hint, SessionViewModel.MIN_VARIANT_TTL_DAYS, SessionViewModel.MAX_VARIANT_TTL_DAYS)
+                }
             )
-        )
-        Text(
-            text = stringResource(
-                id = R.string.debug_asr_min_accepted_speech_ms,
-                settings.asrMinAcceptedSpeechMs
+        }
+        item {
+            ClickableSetting(
+                title = stringResource(id = R.string.variants_clear),
+                subtitle = stringResource(id = R.string.variants_clear_hint),
+                onClick = { viewModel.clearVariantCache() }
             )
-        )
-        Text(
-            text = stringResource(
-                id = R.string.debug_asr_min_accepted_speech_frames,
+        }
+        item {
+             // TODO: Add UI for Dynasty and Author management
+        }
+
+
+        // --- Advanced ASR Tuning Category ---
+        item {
+            val shortSpeechFramesFloor = if (
+                settings.asrMinAcceptedSpeechFrames > SessionViewModel.MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+            ) {
                 settings.asrMinAcceptedSpeechFrames
-            )
-        )
+            } else {
+                SessionViewModel.MIN_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+            }
+            ExpandableSettingsCategory(title = stringResource(R.string.settings_category_advanced)) {
+                var transientPromptText by remember { mutableStateOf(settings.transientAsrPromptThreshold.toString()) }
+                var transientPromptError by remember { mutableStateOf(false) }
+                var transientDelayText by remember { mutableStateOf(settings.transientAsrRetryDelayMs.toString()) }
+                var transientDelayError by remember { mutableStateOf(false) }
+                var stopStartCooldownText by remember { mutableStateOf(settings.asrStopToStartCooldownMs.toString()) }
+                var stopStartCooldownError by remember { mutableStateOf(false) }
+                var minAcceptedSpeechMsText by remember { mutableStateOf(settings.asrMinAcceptedSpeechMs.toString()) }
+                var minAcceptedSpeechMsError by remember { mutableStateOf(false) }
+                var minAcceptedSpeechFramesText by remember { mutableStateOf(settings.asrMinAcceptedSpeechFrames.toString()) }
+                var minAcceptedSpeechFramesError by remember { mutableStateOf(false) }
+                var shortSpeechAcceptFramesText by remember { mutableStateOf(settings.asrShortSpeechAcceptFrames.toString()) }
+                var shortSpeechAcceptFramesError by remember { mutableStateOf(false) }
+
+                LaunchedEffect(settings.transientAsrPromptThreshold) { transientPromptText = settings.transientAsrPromptThreshold.toString(); transientPromptError = false }
+                LaunchedEffect(settings.transientAsrRetryDelayMs) { transientDelayText = settings.transientAsrRetryDelayMs.toString(); transientDelayError = false }
+                LaunchedEffect(settings.asrStopToStartCooldownMs) { stopStartCooldownText = settings.asrStopToStartCooldownMs.toString(); stopStartCooldownError = false }
+                LaunchedEffect(settings.asrMinAcceptedSpeechMs) { minAcceptedSpeechMsText = settings.asrMinAcceptedSpeechMs.toString(); minAcceptedSpeechMsError = false }
+                LaunchedEffect(settings.asrMinAcceptedSpeechFrames) { minAcceptedSpeechFramesText = settings.asrMinAcceptedSpeechFrames.toString(); minAcceptedSpeechFramesError = false }
+                LaunchedEffect(settings.asrShortSpeechAcceptFrames) { shortSpeechAcceptFramesText = settings.asrShortSpeechAcceptFrames.toString(); shortSpeechAcceptFramesError = false }
+
+
+                TextFieldSetting(
+                    value = transientPromptText,
+                    onValueChange = {
+                        transientPromptText = it
+                        val value = it.toIntOrNull()
+                        val isValid = value != null && value in SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD..SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD
+                        transientPromptError = it.isNotEmpty() && !isValid
+                        if (isValid) value?.let(viewModel::setTransientAsrPromptThreshold)
+                    },
+                    label = stringResource(id = R.string.asr_transient_prompt_threshold),
+                    isError = transientPromptError,
+                    supportingText = stringResource(id = R.string.asr_transient_prompt_threshold_hint, SessionViewModel.MIN_TRANSIENT_ASR_PROMPT_THRESHOLD, SessionViewModel.MAX_TRANSIENT_ASR_PROMPT_THRESHOLD)
+                )
+                TextFieldSetting(
+                    value = transientDelayText,
+                    onValueChange = {
+                        transientDelayText = it
+                        val value = it.toIntOrNull()
+                        val isValid = value != null && value in SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS..SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS
+                        transientDelayError = it.isNotEmpty() && !isValid
+                        if (isValid) value?.let(viewModel::setTransientAsrRetryDelayMs)
+                    },
+                    label = stringResource(id = R.string.asr_transient_retry_delay_ms),
+                    isError = transientDelayError,
+                    supportingText = stringResource(id = R.string.asr_transient_retry_delay_ms_hint, SessionViewModel.MIN_TRANSIENT_ASR_RETRY_DELAY_MS, SessionViewModel.MAX_TRANSIENT_ASR_RETRY_DELAY_MS)
+                )
+                TextFieldSetting(
+                    value = stopStartCooldownText,
+                    onValueChange = {
+                        stopStartCooldownText = it
+                        val value = it.toIntOrNull()
+                        val isValid = value != null && value in SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS..SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS
+                        stopStartCooldownError = it.isNotEmpty() && !isValid
+                        if (isValid) value?.let(viewModel::setAsrStopToStartCooldownMs)
+                    },
+                    label = stringResource(id = R.string.asr_stop_start_cooldown_ms),
+                    isError = stopStartCooldownError,
+                    supportingText = stringResource(id = R.string.asr_stop_start_cooldown_ms_hint, SessionViewModel.MIN_ASR_STOP_TO_START_COOLDOWN_MS, SessionViewModel.MAX_ASR_STOP_TO_START_COOLDOWN_MS)
+                )
+                TextFieldSetting(
+                    value = minAcceptedSpeechMsText,
+                    onValueChange = {
+                        minAcceptedSpeechMsText = it
+                        val value = it.toIntOrNull()
+                        val isValid = value != null && value in SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS..SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS
+                        minAcceptedSpeechMsError = it.isNotEmpty() && !isValid
+                        if (isValid) value?.let(viewModel::setAsrMinAcceptedSpeechMs)
+                    },
+                    label = stringResource(id = R.string.asr_min_accepted_speech_ms),
+                    isError = minAcceptedSpeechMsError,
+                    supportingText = stringResource(id = R.string.asr_min_accepted_speech_ms_hint, SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_MS, SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_MS)
+                )
+                TextFieldSetting(
+                    value = minAcceptedSpeechFramesText,
+                    onValueChange = {
+                        minAcceptedSpeechFramesText = it
+                        val value = it.toIntOrNull()
+                        val isValid = value != null && value in SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES..SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES
+                        minAcceptedSpeechFramesError = it.isNotEmpty() && !isValid
+                        if (isValid) value?.let(viewModel::setAsrMinAcceptedSpeechFrames)
+                    },
+                    label = stringResource(id = R.string.asr_min_accepted_speech_frames),
+                    isError = minAcceptedSpeechFramesError,
+                    supportingText = stringResource(id = R.string.asr_min_accepted_speech_frames_hint, SessionViewModel.MIN_ASR_MIN_ACCEPTED_SPEECH_FRAMES, SessionViewModel.MAX_ASR_MIN_ACCEPTED_SPEECH_FRAMES)
+                )
+                TextFieldSetting(
+                    value = shortSpeechAcceptFramesText,
+                    onValueChange = {
+                        shortSpeechAcceptFramesText = it
+                        val value = it.toIntOrNull()
+                        val isValid = value != null && value in shortSpeechFramesFloor..SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES
+                        shortSpeechAcceptFramesError = it.isNotEmpty() && !isValid
+                        if (isValid) value?.let(viewModel::setAsrShortSpeechAcceptFrames)
+                    },
+                    label = stringResource(id = R.string.asr_short_speech_accept_frames),
+                    isError = shortSpeechAcceptFramesError,
+                    supportingText = stringResource(id = R.string.asr_short_speech_accept_frames_hint, shortSpeechFramesFloor, SessionViewModel.MAX_ASR_SHORT_SPEECH_ACCEPT_FRAMES)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                ClickableSetting(title = stringResource(id = R.string.debug_reset_asr_tuning), onClick = { viewModel.resetTransientAsrTuning() })
+            }
+        }
+
+        // --- Debugging Category ---
+        item {
+            ExpandableSettingsCategory(title = stringResource(R.string.settings_category_debug)) {
+                DebugInfoSetting(label = stringResource(id = R.string.debug_all_bridge_checks), value = viewModel.allBridgeCheckResult) {
+                    viewModel.runAllBridgeChecks()
+                }
+                DebugInfoSetting(label = stringResource(id = R.string.debug_bridge_event_check), value = viewModel.eventCheckResult) {
+                    viewModel.runBridgeEventRoundTripCheck()
+                }
+                DebugInfoSetting(label = stringResource(id = R.string.debug_bridge_codec_check), value = viewModel.codecCheckResult) {
+                    viewModel.runBridgeCodecCheck()
+                }
+                DebugInfoSetting(label = stringResource(id = R.string.debug_runtime_path_check), value = viewModel.runtimeCheckResult) {
+                    viewModel.runRuntimePathCheck()
+                }
+                DebugInfoSetting(label = stringResource(id = R.string.debug_asr_error_check), value = viewModel.debugCheckResult) {
+                    viewModel.runAsrErrorFlowCheck()
+                }
+            }
+        }
+    }
+}
+
+// --- Reusable Setting Composables ---
+
+@Composable
+private fun SettingsCategory(title: String) {
+    Column {
+        HorizontalDivider()
         Text(
-            text = stringResource(
-                id = R.string.debug_asr_short_speech_accept_frames,
-                settings.asrShortSpeechAcceptFrames
-            )
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         )
-        Button(onClick = { viewModel.resetTransientAsrTuning() }) {
-            Text(text = stringResource(id = R.string.debug_reset_asr_tuning))
+    }
+}
+
+@Composable
+private fun ExpandableSettingsCategory(
+    title: String,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    SettingsCategory(title)
+    Box(modifier = Modifier
+        .fillMaxWidth()
+        .clickable { expanded = !expanded }
+        .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (expanded) stringResource(R.string.collapse) else stringResource(R.string.expand),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
         }
-        Text(text = stringResource(id = R.string.debug_all_bridge_checks, viewModel.allBridgeCheckResult))
-        Button(onClick = { viewModel.runAllBridgeChecks() }) {
-            Text(text = stringResource(id = R.string.debug_check_all_bridge))
+    }
+
+    AnimatedVisibility(visible = expanded) {
+        Column(modifier = Modifier.padding(bottom = 8.dp)) {
+            content()
         }
-        Text(text = stringResource(id = R.string.debug_bridge_event_check, viewModel.eventCheckResult))
-        Button(onClick = { viewModel.runBridgeEventRoundTripCheck() }) {
-            Text(text = stringResource(id = R.string.debug_check_bridge_event))
+    }
+}
+
+
+@Composable
+private fun ClickableSetting(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        Text(text = stringResource(id = R.string.debug_bridge_codec_check, viewModel.codecCheckResult))
-        Button(onClick = { viewModel.runBridgeCodecCheck() }) {
-            Text(text = stringResource(id = R.string.debug_check_bridge_codec))
+    }
+    HorizontalDivider()
+}
+
+@Composable
+private fun SwitchSetting(
+    title: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        Text(text = stringResource(id = R.string.debug_runtime_path_check, viewModel.runtimeCheckResult))
-        Button(onClick = { viewModel.runRuntimePathCheck() }) {
-            Text(text = stringResource(id = R.string.debug_check_runtime_path))
-        }
-        Text(text = stringResource(id = R.string.debug_asr_error_check, viewModel.debugCheckResult))
-        Button(onClick = { viewModel.runAsrErrorFlowCheck() }) {
-            Text(text = stringResource(id = R.string.debug_check_asr_error))
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            modifier = Modifier.padding(start = 16.dp)
+        )
+    }
+    HorizontalDivider()
+}
+
+@Composable
+private fun DropdownSetting(
+    title: String,
+    selectedValue: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    options: List<Pair<String, String>>,
+    onOptionSelected: (String) -> Unit
+) {
+    Box {
+        ClickableSetting(
+            title = title,
+            subtitle = selectedValue,
+            onClick = { onExpandedChange(true) }
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) }
+        ) {
+            options.forEach { (id, displayName) ->
+                DropdownMenuItem(
+                    text = { Text(displayName) },
+                    onClick = {
+                        onOptionSelected(id)
+                        onExpandedChange(false)
+                    }
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ToggleRow(label: String, value: Boolean, onToggle: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(text = label)
-        Checkbox(checked = value, onCheckedChange = onToggle)
+private fun CheckboxSetting(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onToggle(!checked) }
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null)
+        Spacer(modifier = Modifier.size(6.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@Composable
+private fun SliderSetting(
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    enabled: Boolean
+) {
+    Column(modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(text = title, style = MaterialTheme.typography.bodyLarge)
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..1f,
+            enabled = enabled
+        )
+    }
+    HorizontalDivider()
+}
+
+@Composable
+fun TextFieldSetting(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    isError: Boolean,
+    supportingText: String
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(text = label) },
+            isError = isError,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+            supportingText = { Text(text = supportingText) }
+        )
+    }
+}
+
+@Composable
+private fun DebugInfoSetting(label: String, value: String, onCheck: () -> Unit) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = value.ifEmpty { stringResource(R.string.debug_not_run) },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        TextButton(onClick = onCheck) {
+            Text(stringResource(R.string.run_check))
+        }
+    }
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 }

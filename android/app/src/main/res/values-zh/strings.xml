@@ -111,4 +111,23 @@
     <string name="asr_error_service_unavailable">当前设备不支持语音识别服务。</string>
     <string name="asr_error_fake_engine">检测到占位语音引擎（%1$s），请到系统设置切换语音识别服务。</string>
     <string name="asr_error_start_listening_failed">启动识别失败</string>
+
+    <!-- Settings Categories -->
+    <string name="settings_category_speech">语音服务</string>
+    <string name="settings_category_recognition">识别调优</string>
+    <string name="settings_category_content">内容管理</string>
+    <string name="settings_category_advanced">高级语音调优</string>
+    <string name="settings_category_debug">调试</string>
+
+    <!-- Setting Hints -->
+    <string name="speech_allow_listen_while_speaking_hint">允许应用在朗读诗句的同时，继续监听您的声音</string>
+    <string name="tone_policy_hint">在您背错声调时进行提醒</string>
+    <string name="accent_tolerance_hint">容忍常见的发音不准，如前后鼻音不分</string>
+    <string name="variants_clear_hint">强制从网络重新获取异文数据</string>
+
+    <!-- UI Labels -->
+    <string name="collapse">收起</string>
+    <string name="expand">展开</string>
+    <string name="run_check">运行检查</string>
+    <string name="debug_not_run">未运行</string>
 </resources>

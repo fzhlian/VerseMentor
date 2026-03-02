@@ -3,46 +3,52 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val variantApiEndpoint: String = (project.findProperty("variantApiEndpoint") as String?)?.trim().orEmpty()
-val useSharedCoreReducer: Boolean = (project.findProperty("useSharedCoreReducer") as String?)
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) {
+        localPropsFile.inputStream().use(::load)
+    }
+}
+
+fun readStringProperty(name: String): String? {
+    return (project.findProperty(name) as String?)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: localProperties.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+val variantApiEndpoint: String = readStringProperty("variantApiEndpoint").orEmpty()
+val useSharedCoreReducer: Boolean = readStringProperty("useSharedCoreReducer")
     ?.trim()
     ?.lowercase()
     ?.let { it == "true" || it == "1" || it == "yes" || it == "on" }
     ?: false
-val volcengineAppId: String = (project.findProperty("volcengineAppId") as String?)?.trim().orEmpty()
-val volcengineToken: String = (project.findProperty("volcengineToken") as String?)?.trim().orEmpty()
-val volcengineAsrCluster: String = (project.findProperty("volcengineAsrCluster") as String?)?.trim().orEmpty()
+val volcengineAppId: String = readStringProperty("volcengineAppId").orEmpty()
+val volcengineToken: String = readStringProperty("volcengineToken").orEmpty()
+val volcengineAsrCluster: String = readStringProperty("volcengineAsrCluster").orEmpty()
 val volcengineAsrAddress: String =
-    (project.findProperty("volcengineAsrAddress") as String?)
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("volcengineAsrAddress")
         ?: "wss://openspeech.bytedance.com"
 val volcengineAsrUri: String =
-    (project.findProperty("volcengineAsrUri") as String?)
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("volcengineAsrUri")
         ?: "/api/v2/asr"
 val volcengineUid: String =
-    (project.findProperty("volcengineUid") as String?)
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("volcengineUid")
         ?: "versementor-android"
-val volcengineResourceId: String = (project.findProperty("volcengineResourceId") as String?)?.trim().orEmpty()
+val volcengineResourceId: String = readStringProperty("volcengineResourceId").orEmpty()
 val releaseStoreFilePath: String =
-    (project.findProperty("releaseStoreFile") as String?)?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("releaseStoreFile")
         ?: "${rootDir}/keystore/versementor-release.jks"
 val releaseStorePassword: String =
-    (project.findProperty("releaseStorePassword") as String?)?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("releaseStorePassword")
         ?: "android"
 val releaseKeyAlias: String =
-    (project.findProperty("releaseKeyAlias") as String?)?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("releaseKeyAlias")
         ?: "androiddebugkey"
 val releaseKeyPassword: String =
-    (project.findProperty("releaseKeyPassword") as String?)?.trim()
-        ?.takeIf { it.isNotEmpty() }
+    readStringProperty("releaseKeyPassword")
         ?: "android"
 
 fun quoteForBuildConfig(value: String): String {
@@ -57,8 +63,8 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.4.13"
+        versionCode = 18
+        versionName = "0.4.14"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
         buildConfigField("String", "VOLCENGINE_APP_ID", quoteForBuildConfig(volcengineAppId))

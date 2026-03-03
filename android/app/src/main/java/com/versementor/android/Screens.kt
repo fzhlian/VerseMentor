@@ -185,31 +185,43 @@ fun HomeScreen(
                     .height(130.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .padding(bottom = 20.dp)
-                        .size(width = 220.dp, height = 88.dp)
-                        .clip(RoundedCornerShape(44.dp))
-                        .combinedClickable(
-                            enabled = hasPermission,
-                            interactionSource = startInteractionSource,
-                            indication = null,
-                            onClick = onControlTap,
-                            onLongClick = onControlLongPress
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.home_app_meta,
+                            BuildConfig.VERSION_NAME,
+                            BuildConfig.APP_RELEASE_DATE
                         ),
-                    contentAlignment = Alignment.Center
-                ) {
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xE0FFFFFF),
+                        textAlign = TextAlign.Center
+                    )
                     Box(
                         modifier = Modifier
-                            .size(width = 132.dp, height = 52.dp)
-                            .clip(RoundedCornerShape(26.dp))
-                            .background(Color(0xC8F39A38))
-                    )
-                    Text(
-                        text = buttonLabel,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White
-                    )
+                            .padding(top = 8.dp, bottom = 20.dp)
+                            .size(width = 220.dp, height = 88.dp)
+                            .clip(RoundedCornerShape(44.dp))
+                            .combinedClickable(
+                                enabled = hasPermission,
+                                interactionSource = startInteractionSource,
+                                indication = null,
+                                onClick = onControlTap,
+                                onLongClick = onControlLongPress
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 132.dp, height = 52.dp)
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(Color(0xC8F39A38))
+                        )
+                        Text(
+                            text = buttonLabel,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }

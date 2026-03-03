@@ -103,14 +103,19 @@ class VolcengineSpeechProvider(
 
         val cfg = runtimeConfig()
         if (!cfg.isValid()) {
+            val clusterOrResourceHint = if (cfg.usesBigModelRoute()) {
+                "resourceId(volcengineResourceId/VOLCENGINE_RESOURCE_ID) or cluster(volcengineAsrCluster/volcengineCluster/VOLCENGINE_ASR_CLUSTER/VOLCENGINE_CLUSTER)"
+            } else {
+                "cluster(volcengineAsrCluster/volcengineCluster/VOLCENGINE_ASR_CLUSTER/VOLCENGINE_CLUSTER)"
+            }
             val missing = buildList {
                 if (cfg.appId.isBlank()) add("appId(volcengineAppId/VOLCENGINE_APP_ID)")
                 if (cfg.token.isBlank()) add("token(volcengineToken/VOLCENGINE_TOKEN)")
-                if (cfg.cluster.isBlank()) add("cluster(volcengineAsrCluster/volcengineCluster/VOLCENGINE_ASR_CLUSTER)")
+                if (!cfg.hasRoutingKey()) add(clusterOrResourceHint)
             }.joinToString(separator = ", ")
-            if (cfg.resourceId.isNotBlank() && cfg.cluster.isBlank()) {
+            if (!cfg.usesBigModelRoute() && cfg.resourceId.isNotBlank() && cfg.cluster.isBlank()) {
                 callbacks.onDebug(
-                    "${descriptor.displayName}: resourceId is set but cluster is empty; current SDK init still requires cluster"
+                    "${descriptor.displayName}: resourceId is set but cluster is empty; non-bigmodel route still requires cluster"
                 )
             }
             callbacks.onDebug(
@@ -761,8 +766,16 @@ class VolcengineSpeechProvider(
         val uid: String,
         val resourceId: String
     ) {
+        fun usesBigModelRoute(): Boolean {
+            return asrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
+        }
+
+        fun hasRoutingKey(): Boolean {
+            return cluster.isNotBlank() || (usesBigModelRoute() && resourceId.isNotBlank())
+        }
+
         fun isValid(): Boolean {
-            return appId.isNotBlank() && token.isNotBlank() && cluster.isNotBlank()
+            return appId.isNotBlank() && token.isNotBlank() && hasRoutingKey()
         }
     }
 }

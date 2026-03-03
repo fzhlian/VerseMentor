@@ -4,6 +4,8 @@ plugins {
 }
 
 import java.util.Properties
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 val localProperties = Properties().apply {
     val localPropsFile = rootProject.file("local.properties")
@@ -44,6 +46,9 @@ fun readStringProperty(vararg names: String): String? {
 }
 
 val variantApiEndpoint: String = readStringProperty("variantApiEndpoint").orEmpty()
+val appReleaseDate: String =
+    readStringProperty("appReleaseDate", "APP_RELEASE_DATE")
+        ?: LocalDate.now(ZoneOffset.UTC).toString()
 val useSharedCoreReducer: Boolean = readStringProperty("useSharedCoreReducer")
     ?.trim()
     ?.lowercase()
@@ -120,9 +125,10 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.4.19"
+        versionCode = 24
+        versionName = "0.4.20"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
+        buildConfigField("String", "APP_RELEASE_DATE", quoteForBuildConfig(appReleaseDate))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
         buildConfigField("String", "VOLCENGINE_APP_ID", quoteForBuildConfig(volcengineAppId))
         buildConfigField("String", "VOLCENGINE_TOKEN", quoteForBuildConfig(volcengineToken))

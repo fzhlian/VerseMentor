@@ -100,6 +100,23 @@ val volcengineResourceId: String = readStringProperty(
     "VOLCENGINE_RESOURCE_ID",
     "VOLCENGINE_ASR_RESOURCE_ID"
 ).orEmpty()
+
+val isVolcBigModelRoute: Boolean =
+    volcengineAsrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
+val hasVolcRoutingKey: Boolean =
+    volcengineAsrCluster.isNotBlank() || (isVolcBigModelRoute && volcengineResourceId.isNotBlank())
+if ((volcengineAppId.isNotBlank() || volcengineToken.isNotBlank() || volcengineResourceId.isNotBlank()) && !hasVolcRoutingKey) {
+    val routeHint = if (isVolcBigModelRoute) {
+        "For bigmodel route, set volcengineResourceId (or provide volcengineAsrCluster)."
+    } else {
+        "For non-bigmodel route, set volcengineAsrCluster (or switch volcengineAsrUri to /api/v3/sauc/bigmodel with volcengineResourceId)."
+    }
+    throw GradleException(
+        "Invalid Volcengine ASR config: missing routing key. " +
+            "Current asrUri=\"$volcengineAsrUri\", clusterLen=${volcengineAsrCluster.length}, resourceIdLen=${volcengineResourceId.length}. " +
+            routeHint
+    )
+}
 val releaseStoreFilePath: String =
     readStringProperty("releaseStoreFile")
         ?: "${rootDir}/keystore/versementor-release.jks"
@@ -125,8 +142,8 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 24
-        versionName = "0.4.20"
+        versionCode = 25
+        versionName = "0.4.21"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("String", "APP_RELEASE_DATE", quoteForBuildConfig(appReleaseDate))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())

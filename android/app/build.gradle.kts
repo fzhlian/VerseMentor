@@ -161,8 +161,8 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 26
-        versionName = "0.4.22"
+        versionCode = 27
+        versionName = "0.4.23"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("String", "APP_RELEASE_DATE", quoteForBuildConfig(appReleaseDate))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())

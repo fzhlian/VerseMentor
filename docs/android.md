@@ -65,7 +65,7 @@ Notes:
 - Microphone permission is required for ASR.
 - Internet permission is included for optional online variant fetching.
 - TTS requires a Chinese voice installed on the device.
-- Volcengine ASR requires build-time config injection: `volcengineAppId`, `volcengineToken`, plus a routing key (`volcengineAsrCluster` or, on `/api/v3/sauc/bigmodel`, `volcengineResourceId`). Cluster aliases: `volcengineCluster` / `VOLCENGINE_ASR_CLUSTER` / `VOLCENGINE_CLUSTER`. Public GitHub release APKs cannot include your private vendor credentials automatically.
+- Volc route config is now split by capability: ASR uses `VOLC_ASR_*` / `volcAsr*` and TTS uses `VOLC_TTS_*` / `volcTts*`. Legacy `VOLCENGINE_*` keys are still accepted as fallback with runtime compat warnings.
 - Release build now uses a fixed signing config in `android/app/build.gradle.kts`, defaulting to `android/keystore/versementor-release.jks` (alias/password values also defined there, overridable by Gradle properties). As long as this keystore remains unchanged, future upgrades will not hit signature-conflict install errors.
 - Home background image is loaded from `android/app/src/main/res/drawable/home_background.png` (current file synced from repo root `Background-no.png`).
 - Android ASR no longer depends on `android.speech.SpeechRecognizer` / `RecognitionService`; the speech stack is provider-based (`iFlytek`, `Volcengine`) on top of platform mic capture (`AudioRecord`) and TTS playback.

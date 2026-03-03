@@ -2,12 +2,14 @@ package com.versementor.android.speech
 
 enum class SpeechProviderId(val rawValue: String, val displayName: String) {
     IFLYTEK(rawValue = "iflytek", displayName = "iFlytek"),
-    VOLCENGINE(rawValue = "volc", displayName = "Volcengine");
+    VOLC_ASR(rawValue = "volc_asr", displayName = "Volc ASR"),
+    VOLC_TTS_BIGMODEL(rawValue = "volc_tts_bigmodel", displayName = "Volc TTS BigModel");
 
     companion object {
         fun fromRaw(value: String?): SpeechProviderId {
             val normalized = when (value?.trim()?.lowercase().orEmpty()) {
-                "volcengine" -> "volc"
+                "volcengine",
+                "volc" -> "volc_asr"
                 else -> value?.trim()?.lowercase().orEmpty()
             }
             return entries.firstOrNull { it.rawValue == normalized } ?: IFLYTEK

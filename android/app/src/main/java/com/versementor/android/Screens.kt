@@ -312,7 +312,7 @@ fun SettingsScreen(viewModel: SessionViewModel, onBack: () -> Unit) {
             } else {
                 listOf(
                     VoiceOption(id = "iflytek", displayName = "iFlytek"),
-                    VoiceOption(id = "volc", displayName = "Volcengine")
+                    VoiceOption(id = "volc_asr", displayName = "Volc ASR")
                 )
             }
             val selectedProviderName =

@@ -15,7 +15,8 @@ import com.versementor.android.speech.providers.SpeechProvider
 import com.versementor.android.speech.providers.SpeechProviderCallbacks
 import com.versementor.android.speech.providers.SpeechProviderRegistry
 import com.versementor.android.speech.providers.SpeechListenRequest
-import com.versementor.android.speech.providers.VolcengineSpeechProvider
+import com.versementor.android.speech.providers.VolcBigModelTtsProvider
+import com.versementor.android.speech.providers.VolcStreamingAsrProvider
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -93,7 +94,8 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private var duplexSuppressedUntilMs = 0L
     private var duplexEchoHitCount = 0
     private var lastDuplexEchoHitAtMs = 0L
-    private var activeProviderId = SpeechProviderId.IFLYTEK
+    private var activeAsrProviderId = SpeechProviderId.IFLYTEK
+    private var activeTtsProviderId = SpeechProviderId.IFLYTEK
     private val fallbackVolumeThreshold = 0.2f
     private val fallbackVolumeWarmupMs = 240L
     private val fallbackVolumeRequiredFrames = 3
@@ -117,7 +119,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private val callbacks = object : SpeechProviderCallbacks {
         override fun onAsrReady() {
             if (released) return
-            onAsrDebug?.invoke("AsrEvent.ready provider=${activeProviderId.rawValue}")
+            onAsrDebug?.invoke("AsrEvent.ready provider=${activeAsrProviderId.rawValue}")
         }
 
         override fun onAsrResult(text: String, isFinal: Boolean, confidence: Float?) {
@@ -214,10 +216,10 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 speakingStartedAtMs = System.currentTimeMillis()
                 loudVolumeFrames = 0
                 vadSeenDuringSpeak = false
-                onAsrDebug?.invoke("SpeakEvent.start provider=${activeProviderId.rawValue}")
+                onAsrDebug?.invoke("SpeakEvent.start provider=${activeTtsProviderId.rawValue}")
                 val transition = arbiter.onSpeakingStarted()
                 if (transition.stopListening) {
-                    activeProvider()?.stopListening(reason = "duplex-speaking-started")
+                    activeAsrProvider()?.stopListening(reason = "duplex-speaking-started")
                     onAsrDebug?.invoke("ASR duplex transition: ${transition.reason}")
                 }
             } else {
@@ -226,9 +228,9 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 loudVolumeFrames = 0
                 arbiter.onSpeakingStopped()
                 vadSeenDuringSpeak = false
-                onAsrDebug?.invoke("SpeakEvent.end provider=${activeProviderId.rawValue}")
+                onAsrDebug?.invoke("SpeakEvent.end provider=${activeTtsProviderId.rawValue}")
                 if (ttsDuckActive) {
-                    activeProvider()?.setTtsVolume(1f)
+                    activeTtsProvider()?.setTtsVolume(1f)
                     ttsDuckActive = false
                     lastAppliedDuckVolume = 1f
                     arbiter.onDuckApplied(1f)
@@ -260,7 +262,8 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     private val registry = SpeechProviderRegistry(
         listOf(
             IFlytekSpeechProvider(context.applicationContext, callbacks),
-            VolcengineSpeechProvider(context.applicationContext, callbacks)
+            VolcStreamingAsrProvider(context.applicationContext, callbacks),
+            VolcBigModelTtsProvider(context.applicationContext, callbacks)
         )
     )
 
@@ -305,7 +308,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
                 )
                 return@runOnMainSync false
             }
-            val provider = activeProvider()
+            val provider = activeAsrProvider()
             if (provider == null) {
                 startFailureHandled = true
                 onAsrError?.invoke(
@@ -343,7 +346,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             }
             markListeningStarted(now)
             onAsrDebug?.invoke(
-                "ASR start provider=${activeProviderId.rawValue} allowDuplex=${policy.allowListeningDuringSpeaking} bargeIn=${policy.bargeInMode.rawValue} duckVolume=${policy.duckVolume} ec=${policy.audioProcessing.echoCancellation} ns=${policy.audioProcessing.noiseSuppression}"
+                "ASR start provider=${activeAsrProviderId.rawValue} ttsProvider=${activeTtsProviderId.rawValue} allowDuplex=${policy.allowListeningDuringSpeaking} bargeIn=${policy.bargeInMode.rawValue} duckVolume=${policy.duckVolume} ec=${policy.audioProcessing.echoCancellation} ns=${policy.audioProcessing.noiseSuppression}"
             )
             true
         }
@@ -360,7 +363,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     override fun stopListening(reason: String) {
         runOnMainSync(defaultValue = Unit) {
             lastStopRequestAtMs = System.currentTimeMillis()
-            activeProvider()?.stopListening(reason = reason)
+            activeAsrProvider()?.stopListening(reason = reason)
             markListeningStopped()
             arbiter.onListeningStopped()
         }
@@ -374,14 +377,14 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     override fun speak(text: String, voiceId: String?) {
         runOnMainSync(defaultValue = Unit) {
             if (released) return@runOnMainSync Unit
-            activeProvider()?.speak(text, voiceId)
+            activeTtsProvider()?.speak(text, voiceId)
         }
     }
 
     override fun stopSpeak() {
         runOnMainSync(defaultValue = Unit) {
-            activeProvider()?.stopSpeak()
-            activeProvider()?.setTtsVolume(1f)
+            activeTtsProvider()?.stopSpeak()
+            activeTtsProvider()?.setTtsVolume(1f)
             providerSpeaking = false
             speakingStartedAtMs = 0L
             loudVolumeFrames = 0
@@ -394,23 +397,37 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     }
 
     override fun listVoices(): List<VoiceOption> {
-        return activeProvider()?.listVoices() ?: emptyList()
+        return activeTtsProvider()?.listVoices() ?: emptyList()
     }
 
     override fun listSpeechProviders(): List<SpeechProviderOption> {
-        return registry.listDescriptors().map {
+        return registry.listDescriptors()
+            .filter { descriptor ->
+                descriptor.id == SpeechProviderId.IFLYTEK || descriptor.id == SpeechProviderId.VOLC_ASR
+            }
+            .map {
             SpeechProviderOption(id = it.id.rawValue, displayName = it.displayName)
-        }
+            }
     }
 
     override fun setSpeechProvider(providerId: String) {
         runOnMainSync(defaultValue = Unit) {
             val resolved = SpeechProviderId.fromRaw(providerId)
-            if (resolved == activeProviderId) {
+            val nextAsrProvider = when (resolved) {
+                SpeechProviderId.IFLYTEK -> SpeechProviderId.IFLYTEK
+                SpeechProviderId.VOLC_ASR -> SpeechProviderId.VOLC_ASR
+                SpeechProviderId.VOLC_TTS_BIGMODEL -> SpeechProviderId.IFLYTEK
+            }
+            val nextTtsProvider = when (resolved) {
+                SpeechProviderId.IFLYTEK -> SpeechProviderId.IFLYTEK
+                SpeechProviderId.VOLC_ASR -> SpeechProviderId.VOLC_TTS_BIGMODEL
+                SpeechProviderId.VOLC_TTS_BIGMODEL -> SpeechProviderId.VOLC_TTS_BIGMODEL
+            }
+            if (nextAsrProvider == activeAsrProviderId && nextTtsProvider == activeTtsProviderId) {
                 return@runOnMainSync Unit
             }
-            activeProvider()?.stopListening(reason = "provider-switch")
-            activeProvider()?.stopSpeak()
+            activeAsrProvider()?.stopListening(reason = "provider-switch")
+            activeTtsProvider()?.stopSpeak()
             markListeningStopped()
             arbiter.onListeningStopped()
             arbiter.onSpeakingStopped()
@@ -420,8 +437,9 @@ class SpeechIO(private val context: Context) : ISpeechIO {
             vadSeenDuringSpeak = false
             ttsDuckActive = false
             lastAppliedDuckVolume = 1f
-            activeProviderId = resolved
-            onAsrDebug?.invoke("ASR provider switched -> ${resolved.rawValue}")
+            activeAsrProviderId = nextAsrProvider
+            activeTtsProviderId = nextTtsProvider
+            onAsrDebug?.invoke("ASR provider switched -> asr=${activeAsrProviderId.rawValue}, tts=${activeTtsProviderId.rawValue}")
         }
     }
 
@@ -457,15 +475,15 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     }
 
     override fun hasCapturedAudio(): Boolean {
-        return activeProvider()?.hasCapturedAudio() == true
+        return activeAsrProvider()?.hasCapturedAudio() == true
     }
 
     override fun isCapturePlaybackActive(): Boolean {
-        return activeProvider()?.isCapturePlaybackActive() == true
+        return activeAsrProvider()?.isCapturePlaybackActive() == true
     }
 
     override fun playCapturedAudio(): Boolean {
-        return activeProvider()?.playCapturedAudio() == true
+        return activeAsrProvider()?.playCapturedAudio() == true
     }
 
     override fun release() {
@@ -481,7 +499,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
     }
 
     private fun applyBargeInDecision(decision: BargeInDecision, trigger: String) {
-        val provider = activeProvider() ?: return
+        val provider = activeTtsProvider() ?: return
         when {
             decision.stopTts -> {
                 ttsDuckActive = false
@@ -546,7 +564,7 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         localSilenceTriggered = true
         listeningActive = false
         suppressProviderErrorUntilMs = now + localSilenceErrorSuppressMs
-        activeProvider()?.stopListening(reason = "local-silence-timeout")
+        activeAsrProvider()?.stopListening(reason = "local-silence-timeout")
         arbiter.onListeningStopped()
         onAsrDebug?.invoke("AsrEvent.silence timeout=${elapsed}ms -> local-timeout")
         onAsrError?.invoke(ERROR_SPEECH_TIMEOUT, "local-silence-timeout")
@@ -606,8 +624,12 @@ class SpeechIO(private val context: Context) : ISpeechIO {
         )
     }
 
-    private fun activeProvider(): SpeechProvider? {
-        return registry.get(activeProviderId)
+    private fun activeAsrProvider(): SpeechProvider? {
+        return registry.get(activeAsrProviderId)
+    }
+
+    private fun activeTtsProvider(): SpeechProvider? {
+        return registry.get(activeTtsProviderId)
     }
 
     private fun mapProviderError(code: Int, message: String): Pair<Int, String> {

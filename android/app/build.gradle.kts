@@ -49,6 +49,20 @@ val variantApiEndpoint: String = readStringProperty("variantApiEndpoint").orEmpt
 val appReleaseDate: String =
     readStringProperty("appReleaseDate", "APP_RELEASE_DATE")
         ?: LocalDate.now(ZoneOffset.UTC).toString()
+val volcAsrAppId: String = readStringProperty("volcAsrAppId", "VOLC_ASR_APP_ID").orEmpty()
+val volcAsrToken: String = readStringProperty("volcAsrToken", "VOLC_ASR_TOKEN").orEmpty()
+val volcAsrCluster: String = readStringProperty("volcAsrCluster", "VOLC_ASR_CLUSTER").orEmpty()
+val volcAsrAddress: String = readStringProperty("volcAsrAddress", "VOLC_ASR_ADDRESS") ?: "wss://openspeech.bytedance.com"
+val volcAsrUri: String = readStringProperty("volcAsrUri", "VOLC_ASR_URI") ?: "/api/v2/asr"
+val volcAsrUid: String = readStringProperty("volcAsrUid", "VOLC_ASR_UID") ?: "versementor-android"
+val volcAsrResourceId: String = readStringProperty("volcAsrResourceId", "VOLC_ASR_RESOURCE_ID").orEmpty()
+val volcTtsAppId: String = readStringProperty("volcTtsAppId", "VOLC_TTS_APP_ID").orEmpty()
+val volcTtsToken: String = readStringProperty("volcTtsToken", "VOLC_TTS_TOKEN").orEmpty()
+val volcTtsCluster: String = readStringProperty("volcTtsCluster", "VOLC_TTS_CLUSTER").orEmpty()
+val volcTtsAddress: String = readStringProperty("volcTtsAddress", "VOLC_TTS_ADDRESS") ?: "wss://openspeech.bytedance.com"
+val volcTtsUri: String = readStringProperty("volcTtsUri", "VOLC_TTS_URI") ?: "/api/v3/tts/bigmodel"
+val volcTtsUid: String = readStringProperty("volcTtsUid", "VOLC_TTS_UID") ?: "versementor-android"
+val volcTtsResourceId: String = readStringProperty("volcTtsResourceId", "VOLC_TTS_RESOURCE_ID").orEmpty()
 val useSharedCoreReducer: Boolean = readStringProperty("useSharedCoreReducer")
     ?.trim()
     ?.lowercase()
@@ -101,19 +115,24 @@ val volcengineResourceId: String = readStringProperty(
     "VOLCENGINE_ASR_RESOURCE_ID"
 ).orEmpty()
 
+val effectiveVolcAsrAppId: String = volcAsrAppId.ifBlank { volcengineAppId }
+val effectiveVolcAsrToken: String = volcAsrToken.ifBlank { volcengineToken }
+val effectiveVolcAsrCluster: String = volcAsrCluster.ifBlank { volcengineAsrCluster }
+val effectiveVolcAsrUri: String = volcAsrUri.ifBlank { volcengineAsrUri }
+val effectiveVolcAsrResourceId: String = volcAsrResourceId.ifBlank { volcengineResourceId }
 val isVolcBigModelRoute: Boolean =
-    volcengineAsrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
+    effectiveVolcAsrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
 val hasVolcRoutingKey: Boolean =
-    volcengineAsrCluster.isNotBlank() || (isVolcBigModelRoute && volcengineResourceId.isNotBlank())
-if ((volcengineAppId.isNotBlank() || volcengineToken.isNotBlank() || volcengineResourceId.isNotBlank()) && !hasVolcRoutingKey) {
+    effectiveVolcAsrCluster.isNotBlank() || (isVolcBigModelRoute && effectiveVolcAsrResourceId.isNotBlank())
+if ((effectiveVolcAsrAppId.isNotBlank() || effectiveVolcAsrToken.isNotBlank() || effectiveVolcAsrResourceId.isNotBlank()) && !hasVolcRoutingKey) {
     val routeHint = if (isVolcBigModelRoute) {
-        "For bigmodel route, set volcengineResourceId (or provide volcengineAsrCluster)."
+        "For bigmodel route, set volcAsrResourceId/VOLC_ASR_RESOURCE_ID (or provide volcAsrCluster/VOLC_ASR_CLUSTER)."
     } else {
-        "For non-bigmodel route, set volcengineAsrCluster (or switch volcengineAsrUri to /api/v3/sauc/bigmodel with volcengineResourceId)."
+        "For non-bigmodel route, set volcAsrCluster/VOLC_ASR_CLUSTER (or switch volcAsrUri to /api/v3/sauc/bigmodel with volcAsrResourceId)."
     }
     throw GradleException(
         "Invalid Volcengine ASR config: missing routing key. " +
-            "Current asrUri=\"$volcengineAsrUri\", clusterLen=${volcengineAsrCluster.length}, resourceIdLen=${volcengineResourceId.length}. " +
+            "Current asrUri=\"$effectiveVolcAsrUri\", clusterLen=${effectiveVolcAsrCluster.length}, resourceIdLen=${effectiveVolcAsrResourceId.length}. " +
             routeHint
     )
 }
@@ -142,11 +161,25 @@ android {
         applicationId = "com.versementor.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 25
-        versionName = "0.4.21"
+        versionCode = 26
+        versionName = "0.4.22"
         buildConfigField("String", "VARIANT_API_ENDPOINT", quoteForBuildConfig(variantApiEndpoint))
         buildConfigField("String", "APP_RELEASE_DATE", quoteForBuildConfig(appReleaseDate))
         buildConfigField("boolean", "USE_SHARED_CORE_REDUCER", useSharedCoreReducer.toString())
+        buildConfigField("String", "VOLC_ASR_APP_ID", quoteForBuildConfig(volcAsrAppId))
+        buildConfigField("String", "VOLC_ASR_TOKEN", quoteForBuildConfig(volcAsrToken))
+        buildConfigField("String", "VOLC_ASR_CLUSTER", quoteForBuildConfig(volcAsrCluster))
+        buildConfigField("String", "VOLC_ASR_ADDRESS", quoteForBuildConfig(volcAsrAddress))
+        buildConfigField("String", "VOLC_ASR_URI", quoteForBuildConfig(volcAsrUri))
+        buildConfigField("String", "VOLC_ASR_UID", quoteForBuildConfig(volcAsrUid))
+        buildConfigField("String", "VOLC_ASR_RESOURCE_ID", quoteForBuildConfig(volcAsrResourceId))
+        buildConfigField("String", "VOLC_TTS_APP_ID", quoteForBuildConfig(volcTtsAppId))
+        buildConfigField("String", "VOLC_TTS_TOKEN", quoteForBuildConfig(volcTtsToken))
+        buildConfigField("String", "VOLC_TTS_CLUSTER", quoteForBuildConfig(volcTtsCluster))
+        buildConfigField("String", "VOLC_TTS_ADDRESS", quoteForBuildConfig(volcTtsAddress))
+        buildConfigField("String", "VOLC_TTS_URI", quoteForBuildConfig(volcTtsUri))
+        buildConfigField("String", "VOLC_TTS_UID", quoteForBuildConfig(volcTtsUid))
+        buildConfigField("String", "VOLC_TTS_RESOURCE_ID", quoteForBuildConfig(volcTtsResourceId))
         buildConfigField("String", "VOLCENGINE_APP_ID", quoteForBuildConfig(volcengineAppId))
         buildConfigField("String", "VOLCENGINE_TOKEN", quoteForBuildConfig(volcengineToken))
         buildConfigField("String", "VOLCENGINE_ASR_CLUSTER", quoteForBuildConfig(volcengineAsrCluster))

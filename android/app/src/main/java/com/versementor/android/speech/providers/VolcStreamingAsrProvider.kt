@@ -8,7 +8,6 @@ import com.bytedance.speech.speechengine.SpeechEngineDefines
 import com.bytedance.speech.speechengine.SpeechEngineGenerator
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
-import com.versementor.android.BuildConfig
 import com.versementor.android.VoiceOption
 import com.versementor.android.speech.SpeechProviderId
 import com.versementor.android.speech.platform.AudioCaptureAndroid
@@ -16,7 +15,6 @@ import com.versementor.android.speech.platform.AudioCaptureConfig
 import com.versementor.android.speech.platform.AudioCaptureObserver
 import com.versementor.android.speech.platform.AudioOutputAndroid
 import com.versementor.android.speech.platform.AudioOutputConfig
-import com.versementor.android.speech.platform.AndroidTtsPlayer
 import com.versementor.android.speech.platform.VadState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,20 +23,19 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlin.math.min
 
-class VolcengineSpeechProvider(
+class VolcStreamingAsrProvider(
     context: Context,
     private val callbacks: SpeechProviderCallbacks
 ) : SpeechProvider {
     override val descriptor = SpeechProviderDescriptor(
-        id = SpeechProviderId.VOLCENGINE,
-        displayName = "Volcengine"
+        id = SpeechProviderId.VOLC_ASR,
+        displayName = "Volc ASR"
     )
 
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val microphone = AudioCaptureAndroid(appContext, scope)
     private val output = AudioOutputAndroid(appContext, scope)
-    private val ttsPlayer = AndroidTtsPlayer(appContext)
     private val engineLock = Any()
     private var engine: SpeechEngine? = null
     private var environmentPrepared = false
@@ -69,20 +66,6 @@ class VolcengineSpeechProvider(
 
     init {
         maybePrepareEnvironment()
-        ttsPlayer.onDebug = { message ->
-            callbacks.onDebug("${descriptor.displayName} TTS: $message")
-        }
-        ttsPlayer.onSpeakingChanged = { speaking ->
-            this.speaking = speaking
-            if (!speaking) {
-                // Guard against TTS tail leaking into local VAD.
-                ignoreVadUntilMs = System.currentTimeMillis() + ttsTailIgnoreMs
-            }
-            callbacks.onSpeakingChanged(speaking)
-        }
-        ttsPlayer.onError = { code, message ->
-            callbacks.onSpeakError(code, message)
-        }
         output.onDebug = { message ->
             callbacks.onDebug("${descriptor.displayName} output: $message")
         }
@@ -101,26 +84,25 @@ class VolcengineSpeechProvider(
             return false
         }
 
-        val cfg = runtimeConfig()
-        if (!cfg.isValid()) {
-            val clusterOrResourceHint = if (cfg.usesBigModelRoute()) {
-                "resourceId(volcengineResourceId/VOLCENGINE_RESOURCE_ID) or cluster(volcengineAsrCluster/volcengineCluster/VOLCENGINE_ASR_CLUSTER/VOLCENGINE_CLUSTER)"
-            } else {
-                "cluster(volcengineAsrCluster/volcengineCluster/VOLCENGINE_ASR_CLUSTER/VOLCENGINE_CLUSTER)"
-            }
-            val missing = buildList {
-                if (cfg.appId.isBlank()) add("appId(volcengineAppId/VOLCENGINE_APP_ID)")
-                if (cfg.token.isBlank()) add("token(volcengineToken/VOLCENGINE_TOKEN)")
-                if (!cfg.hasRoutingKey()) add(clusterOrResourceHint)
-            }.joinToString(separator = ", ")
-            if (!cfg.usesBigModelRoute() && cfg.resourceId.isNotBlank() && cfg.cluster.isBlank()) {
-                callbacks.onDebug(
-                    "${descriptor.displayName}: resourceId is set but cluster is empty; non-bigmodel route still requires cluster"
-                )
-            }
+        val (cfg, warnings) = runtimeConfig()
+        warnings.forEach { callbacks.onDebug("${descriptor.displayName}: $it") }
+        val (ttsCfg, ttsWarnings) = VolcConfigLoader.loadTtsConfig()
+        ttsWarnings.forEach { callbacks.onDebug("${descriptor.displayName}: $it") }
+        callbacks.onDebug(
+            "${descriptor.displayName}: ASR route uri=${cfg.uri.ifBlank { "<default>" }} cluster=${cfg.cluster.ifBlank { "<none>" }} | TTS route uri=${ttsCfg.uri.ifBlank { "<default>" }} cluster=${ttsCfg.cluster.ifBlank { "<none>" }}"
+        )
+        if (!cfg.isValidForAsr()) {
             callbacks.onDebug(
-                "${descriptor.displayName}: sdk config missing in BuildConfig -> $missing; lengths appId=${cfg.appId.length}, token=${cfg.token.length}, cluster=${cfg.cluster.length}, resourceId=${cfg.resourceId.length}"
+                "${descriptor.displayName}: invalid ASR config appIdLen=${cfg.appId.length} tokenLen=${cfg.token.length} cluster=${cfg.cluster}"
             )
+            return false
+        }
+        if (cfg.uri.contains("/api/v3", ignoreCase = true) || cfg.uri.contains("bigmodel", ignoreCase = true)) {
+            callbacks.onDebug("${descriptor.displayName}: invalid ASR uri for streaming route -> ${cfg.uri}")
+            return false
+        }
+        if (cfg.cluster.contains("tts", ignoreCase = true)) {
+            callbacks.onDebug("${descriptor.displayName}: invalid ASR cluster contains tts -> ${cfg.cluster}")
             return false
         }
 
@@ -257,19 +239,18 @@ class VolcengineSpeechProvider(
     }
 
     override fun speak(text: String, voiceId: String?) {
-        callbacks.onDebug("${descriptor.displayName}: speak \"${text.take(32)}\"")
-        ttsPlayer.speak(text, voiceId)
+        callbacks.onDebug("${descriptor.displayName}: speak ignored (asr-only provider)")
     }
 
     override fun stopSpeak() {
-        ttsPlayer.stop()
+        callbacks.onDebug("${descriptor.displayName}: stopSpeak ignored (asr-only provider)")
     }
 
     override fun setTtsVolume(volume: Float) {
-        ttsPlayer.setVolumeScale(volume)
+        callbacks.onDebug("${descriptor.displayName}: setTtsVolume ignored (asr-only provider)")
     }
 
-    override fun listVoices(): List<VoiceOption> = ttsPlayer.listVoices()
+    override fun listVoices(): List<VoiceOption> = emptyList()
 
     override fun hasCapturedAudio(): Boolean {
         return microphone.hasCapturedAudio()
@@ -310,7 +291,6 @@ class VolcengineSpeechProvider(
         speaking = false
         microphone.release()
         output.release()
-        ttsPlayer.release()
     }
 
     private fun maybePrepareEnvironment() {
@@ -330,7 +310,7 @@ class VolcengineSpeechProvider(
         }
     }
 
-    private fun startAsrEngine(request: SpeechListenRequest, cfg: VolcengineAsrConfig): Boolean {
+    private fun startAsrEngine(request: SpeechListenRequest, cfg: VolcAsrConfig): Boolean {
         synchronized(engineLock) {
             val sdk = runCatching { SpeechEngineGenerator.getInstance() }
                 .getOrElse { error ->
@@ -345,7 +325,7 @@ class VolcengineSpeechProvider(
             runCatching { sdk.setListener(speechListener) }
 
             callbacks.onDebug(
-                "${descriptor.displayName}: init config route uri=${cfg.asrUri.ifBlank { "<default>" }} cluster=${cfg.cluster.ifBlank { "<none>" }} resourceId=${cfg.resourceId.ifBlank { "<none>" }} appIdLen=${cfg.appId.length} tokenLen=${cfg.token.length}"
+                "${descriptor.displayName}: init config route uri=${cfg.uri.ifBlank { "<default>" }} cluster=${cfg.cluster.ifBlank { "<none>" }} resourceId=${cfg.resourceId.ifBlank { "<none>" }} appIdLen=${cfg.appId.length} tokenLen=${cfg.token.length}"
             )
             applyBaseOptions(sdk, cfg)
             applyAsrOptions(sdk, request)
@@ -356,7 +336,7 @@ class VolcengineSpeechProvider(
                     Int.MIN_VALUE
                 }
             if (initCode != 0) {
-                callbacks.onDebug("${descriptor.displayName}: init engine code=$initCode")
+                callbacks.onDebug("${descriptor.displayName}: init engine code=$initCode (${humanReadableInitFailure(cfg, initCode)})")
                 runCatching { sdk.destroyEngine() }
                 engine = null
                 return false
@@ -392,7 +372,7 @@ class VolcengineSpeechProvider(
         }
     }
 
-    private fun applyBaseOptions(engine: SpeechEngine, cfg: VolcengineAsrConfig) {
+    private fun applyBaseOptions(engine: SpeechEngine, cfg: VolcAsrConfig) {
         engine.setOptionString(
             SpeechEngineDefines.PARAMS_KEY_ENGINE_NAME_STRING,
             SpeechEngineDefines.ASR_ENGINE
@@ -425,16 +405,16 @@ class VolcengineSpeechProvider(
                 cfg.resourceId
             )
         }
-        if (cfg.asrAddress.isNotBlank()) {
+        if (cfg.address.isNotBlank()) {
             engine.setOptionString(
                 SpeechEngineDefines.PARAMS_KEY_ASR_ADDRESS_STRING,
-                cfg.asrAddress
+                cfg.address
             )
         }
-        if (cfg.asrUri.isNotBlank()) {
+        if (cfg.uri.isNotBlank()) {
             engine.setOptionString(
                 SpeechEngineDefines.PARAMS_KEY_ASR_URI_STRING,
-                cfg.asrUri
+                cfg.uri
             )
         }
         applyProtocolOptions(engine, cfg)
@@ -457,8 +437,8 @@ class VolcengineSpeechProvider(
         )
     }
 
-    private fun applyProtocolOptions(engine: SpeechEngine, cfg: VolcengineAsrConfig) {
-        val bigModelRoute = cfg.asrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
+    private fun applyProtocolOptions(engine: SpeechEngine, cfg: VolcAsrConfig) {
+        val bigModelRoute = cfg.uri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
         if (!bigModelRoute) return
         runCatching {
             val defines = SpeechEngineDefines::class.java
@@ -743,39 +723,25 @@ class VolcengineSpeechProvider(
         return null
     }
 
-    private fun runtimeConfig(): VolcengineAsrConfig {
-        val uidFromBuild = BuildConfig.VOLCENGINE_UID.trim()
-        val fallbackUid = uidFromBuild.ifBlank { "versementor-${android.os.Build.MODEL}" }
-        return VolcengineAsrConfig(
-            appId = BuildConfig.VOLCENGINE_APP_ID.trim(),
-            token = BuildConfig.VOLCENGINE_TOKEN.trim(),
-            cluster = BuildConfig.VOLCENGINE_ASR_CLUSTER.trim(),
-            asrAddress = BuildConfig.VOLCENGINE_ASR_ADDRESS.trim(),
-            asrUri = BuildConfig.VOLCENGINE_ASR_URI.trim(),
-            uid = fallbackUid,
-            resourceId = BuildConfig.VOLCENGINE_RESOURCE_ID.trim()
-        )
+    private fun runtimeConfig(): Pair<VolcAsrConfig, List<String>> {
+        val (cfg, warnings) = VolcConfigLoader.loadAsrConfig()
+        val fallbackUid = cfg.uid.ifBlank { "versementor-${android.os.Build.MODEL}" }
+        return cfg.copy(uid = fallbackUid) to warnings
     }
 
-    private data class VolcengineAsrConfig(
-        val appId: String,
-        val token: String,
-        val cluster: String,
-        val asrAddress: String,
-        val asrUri: String,
-        val uid: String,
-        val resourceId: String
-    ) {
-        fun usesBigModelRoute(): Boolean {
-            return asrUri.contains("/api/v3/sauc/bigmodel", ignoreCase = true)
-        }
+    private fun VolcAsrConfig.isValidForAsr(): Boolean {
+        return appId.isNotBlank() && token.isNotBlank() && cluster.isNotBlank()
+    }
 
-        fun hasRoutingKey(): Boolean {
-            return cluster.isNotBlank() || (usesBigModelRoute() && resourceId.isNotBlank())
-        }
-
-        fun isValid(): Boolean {
-            return appId.isNotBlank() && token.isNotBlank() && hasRoutingKey()
+    private fun humanReadableInitFailure(cfg: VolcAsrConfig, initCode: Int): String {
+        return when {
+            cfg.appId.isBlank() || cfg.token.isBlank() -> "missing appId/token"
+            cfg.cluster.isBlank() -> "missing asr cluster"
+            cfg.uri.contains("/api/v3", ignoreCase = true) || cfg.uri.contains("bigmodel", ignoreCase = true) ->
+                "ASR uses TTS/bigmodel uri; use streaming ASR uri like /api/v2/asr"
+            cfg.cluster.contains("tts", ignoreCase = true) -> "ASR cluster looks like TTS cluster"
+            initCode == Int.MIN_VALUE -> "SDK threw exception during init"
+            else -> "check route/cluster/app credentials"
         }
     }
 }

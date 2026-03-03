@@ -4,17 +4,26 @@
 
 sdk.dir=
 
-# Volcengine ASR SDK (com.bytedance.speechengine:speechengine_asr_tob)
+# Volcengine ASR (streaming)
 # Required:
-# volcengineAppId=your_app_id
-# volcengineToken=your_access_token
-# volcengineAsrCluster=your_asr_cluster
-#   (If using /api/v3/sauc/bigmodel route, you can also provide volcengineResourceId instead of cluster)
-# Alias keys also supported:
-# volcengineCluster / VOLCENGINE_ASR_CLUSTER / VOLCENGINE_CLUSTER
+# volcAsrAppId=your_app_id
+# volcAsrToken=your_access_token
+# volcAsrCluster=your_asr_cluster
 #
 # Optional:
-# volcengineAsrAddress=wss://openspeech.bytedance.com
-# volcengineAsrUri=/api/v2/asr
-# volcengineUid=versementor-android
-# volcengineResourceId=
+# volcAsrAddress=wss://openspeech.bytedance.com
+# volcAsrUri=/api/v2/asr
+# volcAsrUid=versementor-android
+# volcAsrResourceId=
+#
+# Volcengine TTS (bigmodel route)
+# Optional but recommended when pairing with `volc_asr`:
+# volcTtsAppId=your_app_id
+# volcTtsToken=your_access_token
+# volcTtsCluster=your_tts_cluster
+# volcTtsAddress=wss://openspeech.bytedance.com
+# volcTtsUri=/api/v3/tts/bigmodel
+# volcTtsUid=versementor-android
+# volcTtsResourceId=
+#
+# Legacy VOLCENGINE_* keys remain backward-compatible and will emit compat warnings at runtime.

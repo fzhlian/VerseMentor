@@ -1270,13 +1270,16 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
             .distinct()
         val candidates = (configuredProviders + discoveredProviders)
             .distinct()
+            .filter { id ->
+                id == SpeechProviderId.IFLYTEK.rawValue || id == SpeechProviderId.VOLC_ASR.rawValue
+            }
             .filter { id -> id != currentProvider }
         if (candidates.isEmpty()) {
             return false
         }
         val nextProvider = when {
-            currentProvider != SpeechProviderId.VOLCENGINE.rawValue &&
-                candidates.contains(SpeechProviderId.VOLCENGINE.rawValue) -> SpeechProviderId.VOLCENGINE.rawValue
+            currentProvider != SpeechProviderId.VOLC_ASR.rawValue &&
+                candidates.contains(SpeechProviderId.VOLC_ASR.rawValue) -> SpeechProviderId.VOLC_ASR.rawValue
 
             currentProvider != SpeechProviderId.IFLYTEK.rawValue &&
                 candidates.contains(SpeechProviderId.IFLYTEK.rawValue) -> SpeechProviderId.IFLYTEK.rawValue
@@ -1440,7 +1443,8 @@ class SessionViewModel(app: Application) : AndroidViewModel(app) {
     private fun providerSupportsDuplexListening(providerId: String): Boolean {
         return when (SpeechProviderId.fromRaw(providerId)) {
             SpeechProviderId.IFLYTEK,
-            SpeechProviderId.VOLCENGINE -> true
+            SpeechProviderId.VOLC_ASR,
+            SpeechProviderId.VOLC_TTS_BIGMODEL -> true
         }
     }
 
